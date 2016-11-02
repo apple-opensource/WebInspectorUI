@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,26 +23,22 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WebInspector.MetricsStyleDetailsPanel = class MetricsStyleDetailsPanel extends WebInspector.StyleDetailsPanel
-{
-    constructor(delegate)
-    {
-        super(delegate, "metrics", "metrics", WebInspector.UIString("Metrics"));
+.visual-style-property-container.keyword-checkbox > .visual-style-property-value-container {
+    display: flex;
+    align-items: center;
+}
 
-        this._boxModelDiagramRow = new WebInspector.BoxModelDetailsSectionRow;
+.visual-style-property-container.keyword-checkbox > .visual-style-property-value-container > input {
+    width: auto;
+}
 
-        var boxModelGroup = new WebInspector.DetailsSectionGroup([this._boxModelDiagramRow]);
-        var boxModelSection = new WebInspector.DetailsSection("style-box-model", WebInspector.UIString("Box Model"), [boxModelGroup]);
-
-        this.element.appendChild(boxModelSection.element);
-    }
-
-    // Public
-
-    refresh()
-    {
-        this._boxModelDiagramRow.nodeStyles = this.nodeStyles;
-
-        super.refresh();
-    }
-};
+/* Font Variant */
+.visual-style-property-container.keyword-checkbox.font-variant > .visual-style-property-value-container > input::after {
+    position: absolute;
+    top: 5px;
+    left: 15px;
+    font-size: 9px;
+    font-variant: small-caps;
+    word-spacing: -2px;
+    content: "Small Caps";
+}

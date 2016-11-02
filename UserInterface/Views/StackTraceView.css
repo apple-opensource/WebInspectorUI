@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,44 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-.popover .edit-breakpoint-popover-content {
-    width: 420px;
-    padding: 5px 15px;
-}
-
-.popover .edit-breakpoint-popover-content.wide {
-    width: 460px;
-}
-
-.popover .edit-breakpoint-popover-content > label.toggle {
-    color: black;
-    font-weight: bold;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.popover .edit-breakpoint-popover-content > table {
-    width: 100%;
-}
-
-.popover .edit-breakpoint-popover-content > table > tr > th {
-    color: rgb(89, 89, 89);
-    font-weight: bold;
-    text-align: right;
-    width: 1px; /* Shrink to fit. */
-    vertical-align: top;
-    line-height: 23px;
-}
-
-.popover .edit-breakpoint-popover-content > table > tr > td {
-    padding-left: 5px;
-}
-
-#edit-breakpoint-popover-condition {
-    width: 100%;
-}
-
-#edit-breakpoint-popoover-auto-continue {
-    margin-left: 0;
-    margin-right: 4px;
+.stack-trace > .call-frame {
+    margin: 1px 0;
 }
