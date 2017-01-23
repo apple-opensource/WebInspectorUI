@@ -1,3 +1,49 @@
+2016-10-24  Matthew Hanson  <matthew_hanson@apple.com>
+
+        Merge r207229. rdar://problem/28718809
+
+    2016-10-12  Joseph Pecoraro  <pecoraro@apple.com>
+
+            Web Inspector: Improve support for logging Proxy objects in console
+            https://bugs.webkit.org/show_bug.cgi?id=163323
+            <rdar://problem/28432553>
+
+            Reviewed by Timothy Hatcher.
+
+            * UserInterface/Views/ConsoleMessageView.js:
+            (WebInspector.ConsoleMessageView.prototype._formatParameter):
+            Treat a Proxy like any other object.
+
+2016-10-12  Matthew Hanson  <matthew_hanson@apple.com>
+
+        Merge r204428. rdar://problem/28476954
+
+    2016-08-12  Nikita Vasilyev  <nvasilyev@apple.com>
+
+            Web Inspector: Command-Shift-O causes infinite loop if web page has frames
+            https://bugs.webkit.org/show_bug.cgi?id=160810
+
+            Reviewed by Joseph Pecoraro.
+
+            * UserInterface/Views/OpenResourceDialog.js:
+            (WebInspector.OpenResourceDialog.prototype._addResourcesForFrame):
+            "frame" doesn't change inside the loop.
+
+2016-09-09  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r205192. rdar://problem/28097740
+
+    2016-08-30  Alex Christensen  <achristensen@webkit.org>
+
+            Fix WebInspectorUI in internal Windows build
+            https://bugs.webkit.org/show_bug.cgi?id=161221
+            rdar://problem/28019023
+
+            Reviewed by Brent Fulgham and Joseph Pecoraro.
+
+            * WebInspectorUI.vcxproj/WebInspectorUI.make:
+            * WebInspectorUI.vcxproj/WebInspectorUI.proj:
+
 2016-07-28  Babak Shafiei  <bshafiei@apple.com>
 
         Merge r203673. rdar://problem/27517481
