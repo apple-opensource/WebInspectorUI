@@ -33,35 +33,10 @@ WI.TextEditor = class TextEditor extends WI.View
 
         this._codeMirror = WI.CodeMirrorEditor.create(this.element, {
             readOnly: true,
-            indentWithTabs: WI.settings.indentWithTabs.value,
-            indentUnit: WI.settings.indentUnit.value,
-            tabSize: WI.settings.tabSize.value,
             lineNumbers: true,
-            lineWrapping: WI.settings.enableLineWrapping.value,
             matchBrackets: true,
             autoCloseBrackets: true,
-            showWhitespaceCharacters: WI.settings.showWhitespaceCharacters.value,
             styleSelectedText: true,
-        });
-
-        WI.settings.indentWithTabs.addEventListener(WI.Setting.Event.Changed, (event) => {
-            this._codeMirror.setOption("indentWithTabs", WI.settings.indentWithTabs.value);
-        });
-
-        WI.settings.indentUnit.addEventListener(WI.Setting.Event.Changed, (event) => {
-            this._codeMirror.setOption("indentUnit", WI.settings.indentUnit.value);
-        });
-
-        WI.settings.tabSize.addEventListener(WI.Setting.Event.Changed, (event) => {
-            this._codeMirror.setOption("tabSize", WI.settings.tabSize.value);
-        });
-
-        WI.settings.enableLineWrapping.addEventListener(WI.Setting.Event.Changed, (event) => {
-            this._codeMirror.setOption("lineWrapping", WI.settings.enableLineWrapping.value);
-        });
-
-        WI.settings.showWhitespaceCharacters.addEventListener(WI.Setting.Event.Changed, (event) => {
-            this._codeMirror.setOption("showWhitespaceCharacters", WI.settings.showWhitespaceCharacters.value);
         });
 
         this._codeMirror.on("focus", this._editorFocused.bind(this));
@@ -94,6 +69,7 @@ WI.TextEditor = class TextEditor extends WI.View
         this._formattingPromise = null;
         this._formatterSourceMap = null;
         this._deferReveal = false;
+        this._repeatReveal = false;
 
         this._delegate = delegate || null;
     }
@@ -112,16 +88,17 @@ WI.TextEditor = class TextEditor extends WI.View
 
     set string(newString)
     {
+        let previousSelectedTextRange = this._repeatReveal ? this.selectedTextRange : null;
+
         function update()
         {
             // Clear any styles that may have been set on the empty line before content loaded.
             if (this._initialStringNotSet)
                 this._codeMirror.removeLineClass(0, "wrap");
 
-            if (this._codeMirror.getValue() !== newString) {
+            if (this._codeMirror.getValue() !== newString)
                 this._codeMirror.setValue(newString);
-                console.assert(this.string.length === newString.length, "A lot of our code depends on precise text offsets, so the string should remain the same.");
-            } else {
+            else {
                 // Ensure we at display content even if the value did not change. This often happens when auto formatting.
                 this.layout();
             }
@@ -138,6 +115,13 @@ WI.TextEditor = class TextEditor extends WI.View
                     this._searchQuery = null;
                     this.performSearch(query);
                 }
+
+                if (this._codeMirror.getMode().name === "null") {
+                    // If the content matches a known MIME type, but isn't explicitly declared as
+                    // such, attempt to detect that so we can enable syntax highlighting and
+                    // formatting features.
+                    this._attemptToDetermineMIMEType();
+                }
             }
 
             // Update the execution line now that we might have content for that line.
@@ -148,8 +132,13 @@ WI.TextEditor = class TextEditor extends WI.View
             for (var lineNumber in this._breakpoints)
                 this._setBreakpointStylesOnLine(lineNumber);
 
-            // Try revealing the pending line now that we might have content with enough lines.
+            // Try revealing the pending line, or previous position, now that we might have new content.
             this._revealPendingPositionIfPossible();
+            if (previousSelectedTextRange) {
+                this.selectedTextRange = previousSelectedTextRange;
+                let position = this._codeMirrorPositionFromTextRange(previousSelectedTextRange);
+                this._scrollIntoViewCentered(position.start);
+            }
         }
 
         this._ignoreCodeMirrorContentDidChangeEvent++;
@@ -166,6 +155,7 @@ WI.TextEditor = class TextEditor extends WI.View
     set readOnly(readOnly)
     {
         this._codeMirror.setOption("readOnly", readOnly);
+        this._codeMirror.getWrapperElement().classList.toggle("read-only", !!readOnly);
     }
 
     get formatted()
@@ -186,7 +176,7 @@ WI.TextEditor = class TextEditor extends WI.View
 
     updateFormattedState(formatted)
     {
-        return this._format(formatted).catch(handlePromiseException);
+        return this._format(formatted);
     }
 
     hasFormatter()
@@ -197,7 +187,7 @@ WI.TextEditor = class TextEditor extends WI.View
 
     canBeFormatted()
     {
-        // Can be overriden by subclasses.
+        // Can be overridden by subclasses.
         return this.hasFormatter();
     }
 
@@ -220,6 +210,9 @@ WI.TextEditor = class TextEditor extends WI.View
 
     set selectedTextRange(textRange)
     {
+        if (document.activeElement === document.body)
+            this.focus();
+
         var position = this._codeMirrorPositionFromTextRange(textRange);
         this._codeMirror.setSelection(position.start, position.end);
     }
@@ -235,6 +228,8 @@ WI.TextEditor = class TextEditor extends WI.View
 
         this._mimeType = newMIMEType;
         this._codeMirror.setOption("mode", {name: newMIMEType, globalVars: true});
+
+        this.dispatchEventToListeners(WI.TextEditor.Event.MIMETypeChanged);
     }
 
     get executionLineNumber()
@@ -293,6 +288,11 @@ WI.TextEditor = class TextEditor extends WI.View
         this._deferReveal = defer;
     }
 
+    set repeatReveal(repeat)
+    {
+        this._repeatReveal = repeat;
+    }
+
     performSearch(query)
     {
         if (this._searchQuery === query)
@@ -314,7 +314,7 @@ WI.TextEditor = class TextEditor extends WI.View
         }
 
         // Go down the slow patch for all other text content.
-        var queryRegex = new RegExp(query.escapeForRegExp(), "gi");
+        let queryRegex = WI.SearchUtilities.regExpForString(query, WI.SearchUtilities.defaultSettings);
         var searchCursor = this._codeMirror.getSearchCursor(queryRegex, {line: 0, ch: 0}, false);
         var boundBatchSearch = batchSearch.bind(this);
         var numberOfSearchResultsDidChangeTimeout = null;
@@ -467,13 +467,13 @@ WI.TextEditor = class TextEditor extends WI.View
 
     getTextInRange(startPosition, endPosition)
     {
-        return this._codeMirror.getRange(startPosition, endPosition);
+        return this._codeMirror.getRange(startPosition.toCodeMirror(), endPosition.toCodeMirror());
     }
 
     addStyleToTextRange(startPosition, endPosition, styleClassName)
     {
-        endPosition.ch += 1;
-        return this._codeMirror.getDoc().markText(startPosition, endPosition, {className: styleClassName, inclusiveLeft: true, inclusiveRight: true});
+        endPosition = endPosition.offsetColumn(1);
+        return this._codeMirror.getDoc().markText(startPosition.toCodeMirror(), endPosition.toCodeMirror(), {className: styleClassName, inclusiveLeft: true, inclusiveRight: true});
     }
 
     revealPosition(position, textRangeToSelect, forceUnformatted, noHighlight)
@@ -508,7 +508,7 @@ WI.TextEditor = class TextEditor extends WI.View
         let lineHandle = this._codeMirror.getLineHandle(line);
 
         if (!textRangeToSelect) {
-            let column = Number.constrain(position.columnNumber, 0, this._codeMirror.getLine(line).length - 1);
+            let column = Number.constrain(position.columnNumber, 0, this._codeMirror.getLine(line).length);
             textRangeToSelect = new WI.TextRange(line, column, line, column);
         }
 
@@ -560,15 +560,6 @@ WI.TextEditor = class TextEditor extends WI.View
     hidden()
     {
         this._visible = false;
-    }
-
-    close()
-    {
-        WI.settings.indentWithTabs.removeEventListener(null, null, this);
-        WI.settings.indentUnit.removeEventListener(null, null, this);
-        WI.settings.tabSize.removeEventListener(null, null, this);
-        WI.settings.enableLineWrapping.removeEventListener(null, null, this);
-        WI.settings.showWhitespaceCharacters.removeEventListener(null, null, this);
     }
 
     setBreakpointInfoForLineAndColumn(lineNumber, columnNumber, breakpointInfo)
@@ -720,6 +711,35 @@ WI.TextEditor = class TextEditor extends WI.View
         return {startOffset, endOffset};
     }
 
+    visibleRangePositions()
+    {
+        let visibleRange = this._codeMirror.getViewport();
+        let startLine;
+        let endLine;
+
+        if (this._formatterSourceMap) {
+            startLine = this._formatterSourceMap.formattedToOriginal(Math.max(visibleRange.from - 1, 0), 0).lineNumber;
+            endLine = this._formatterSourceMap.formattedToOriginal(visibleRange.to - 1, 0).lineNumber;
+        } else {
+            startLine = visibleRange.from;
+            endLine = visibleRange.to;
+        }
+
+        return {
+            startPosition: new WI.SourceCodePosition(startLine, 0),
+            endPosition: new WI.SourceCodePosition(endLine, 0)
+        };
+    }
+
+    originalPositionToCurrentPosition(position)
+    {
+        if (!this._formatterSourceMap)
+            return position;
+
+        let {lineNumber, columnNumber} = this._formatterSourceMap.originalToFormatted(position.lineNumber, position.columnNumber);
+        return new WI.SourceCodePosition(lineNumber, columnNumber);
+    }
+
     originalOffsetToCurrentPosition(offset)
     {
         var position = null;
@@ -734,7 +754,8 @@ WI.TextEditor = class TextEditor extends WI.View
 
     currentOffsetToCurrentPosition(offset)
     {
-        return this._codeMirror.getDoc().posFromIndex(offset);
+        let pos = this._codeMirror.getDoc().posFromIndex(offset);
+        return new WI.SourceCodePosition(pos.line, pos.ch);
     }
 
     currentPositionToOriginalOffset(position)
@@ -754,18 +775,18 @@ WI.TextEditor = class TextEditor extends WI.View
         if (!this._formatterSourceMap)
             return position;
 
-        let location = this._formatterSourceMap.formattedToOriginal(position.line, position.ch);
-        return {line: location.lineNumber, ch: location.columnNumber};
+        let location = this._formatterSourceMap.formattedToOriginal(position.lineNumber, position.columnNumber);
+        return new WI.SourceCodePosition(location.lineNumber, location.columnNumber);
     }
 
     currentPositionToCurrentOffset(position)
     {
-        return this._codeMirror.getDoc().indexFromPos(position);
+        return this._codeMirror.getDoc().indexFromPos(position.toCodeMirror());
     }
 
     setInlineWidget(position, inlineElement)
     {
-        return this._codeMirror.setUniqueBookmark(position, {widget: inlineElement});
+        return this._codeMirror.setUniqueBookmark(position.toCodeMirror(), {widget: inlineElement});
     }
 
     addScrollHandler(handler)
@@ -841,27 +862,51 @@ WI.TextEditor = class TextEditor extends WI.View
 
     _canUseFormatterWorker()
     {
-        return this._codeMirror.getMode().name === "javascript";
+        let mode = this._codeMirror.getMode().name;
+        return mode === "javascript" || mode === "css";
+    }
+
+    _attemptToDetermineMIMEType()
+    {
+        let startTime = Date.now();
+
+        const isModule = false;
+        const includeSourceMapData = false;
+        let workerProxy = WI.FormatterWorkerProxy.singleton();
+        workerProxy.formatJavaScript(this.string, isModule, WI.indentString(), includeSourceMapData, ({formattedText}) => {
+            if (!formattedText)
+                return;
+
+            this.mimeType = "text/javascript";
+
+            if (Date.now() - startTime < 100)
+                this.updateFormattedState(true);
+        });
     }
 
     _startWorkerPrettyPrint(beforePrettyPrintState, callback)
     {
+        let workerProxy = WI.FormatterWorkerProxy.singleton();
         let sourceText = this._codeMirror.getValue();
         let indentString = WI.indentString();
         const includeSourceMapData = true;
 
-        let sourceType = this._delegate ? this._delegate.textEditorScriptSourceType(this) : WI.Script.SourceType.Program;
-        const isModule = sourceType === WI.Script.SourceType.Module;
-
-        let workerProxy = WI.FormatterWorkerProxy.singleton();
-        workerProxy.formatJavaScript(sourceText, isModule, indentString, includeSourceMapData, ({formattedText, sourceMapData}) => {
+        let formatCallback = ({formattedText, sourceMapData}) => {
             // Handle if formatting failed, which is possible for invalid programs.
             if (formattedText === null) {
                 callback();
                 return;
             }
             this._finishPrettyPrint(beforePrettyPrintState, formattedText, sourceMapData, callback);
-        });
+        };
+
+        let mode = this._codeMirror.getMode().name;
+        if (mode === "javascript") {
+            let sourceType = this._delegate ? this._delegate.textEditorScriptSourceType(this) : WI.Script.SourceType.Program;
+            const isModule = sourceType === WI.Script.SourceType.Module;
+            workerProxy.formatJavaScript(sourceText, isModule, indentString, includeSourceMapData, formatCallback);
+        } else if (mode === "css")
+            workerProxy.formatCSS(sourceText, indentString, includeSourceMapData, formatCallback);
     }
 
     _startCodeMirrorPrettyPrint(beforePrettyPrintState, callback)
@@ -1293,13 +1338,9 @@ WI.TextEditor = class TextEditor extends WI.View
         if (isNaN(this._executionLineNumber))
             return;
 
-        let currentPosition = {line: this._executionLineNumber, ch: this._executionColumnNumber};
-        let originalOffset = this.currentPositionToOriginalOffset(currentPosition);
-        let originalCodeMirrorPosition = this.currentPositionToOriginalPosition(currentPosition);
-        let originalPosition = new WI.SourceCodePosition(originalCodeMirrorPosition.line, originalCodeMirrorPosition.ch);
-        let characterAtOffset = this._codeMirror.getRange(currentPosition, {line: this._executionLineNumber, ch: this._executionColumnNumber + 1});
+        let currentPosition = new WI.SourceCodePosition(this._executionLineNumber, this._executionColumnNumber);
 
-        this._delegate.textEditorExecutionHighlightRange(originalOffset, originalPosition, characterAtOffset, (range) => {
+        this._delegate.textEditorExecutionHighlightRange(currentPosition, (range) => {
             let start, end;
             if (!range) {
                 // Highlight the rest of the line.
@@ -1307,8 +1348,8 @@ WI.TextEditor = class TextEditor extends WI.View
                 end = {line: this._executionLineNumber};
             } else {
                 // Highlight the range.
-                start = this.originalOffsetToCurrentPosition(range[0]);
-                end = this.originalOffsetToCurrentPosition(range[1]);
+                start = range.startPosition.toCodeMirror();
+                end = range.endPosition.toCodeMirror();
             }
 
             // Ensure the marker is cleared in case there were multiple updates very quickly.
@@ -1619,6 +1660,9 @@ WI.TextEditor = class TextEditor extends WI.View
 
     _openClickedLinks(event)
     {
+        if (!this.readOnly && !event.commandOrControlKey)
+            return;
+
         // Get the position in the text and the token at that position.
         var position = this._codeMirror.coordsChar({left: event.pageX, top: event.pageY});
         var tokenInfo = this._codeMirror.getTokenAt(position);
@@ -1681,5 +1725,6 @@ WI.TextEditor.Event = {
     ExecutionLineNumberDidChange: "text-editor-execution-line-number-did-change",
     NumberOfSearchResultsDidChange: "text-editor-number-of-search-results-did-change",
     ContentDidChange: "text-editor-content-did-change",
-    FormattingDidChange: "text-editor-formatting-did-change"
+    FormattingDidChange: "text-editor-formatting-did-change",
+    MIMETypeChanged: "text-editor-mime-type-changed",
 };

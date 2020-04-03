@@ -27,8 +27,7 @@ WI.DebuggerTabContentView = class DebuggerTabContentView extends WI.ContentBrows
 {
     constructor(identifier)
     {
-        let {image, title} = WI.DebuggerTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
+        let tabBarItem = WI.GeneralTabBarItem.fromTabInfo(WI.DebuggerTabContentView.tabInfo());
         let detailsSidebarPanelConstructors = [WI.ScopeChainDetailsSidebarPanel, WI.ResourceDetailsSidebarPanel, WI.ProbeDetailsSidebarPanel];
 
         super(identifier || "debugger", "debugger", tabBarItem, WI.DebuggerSidebarPanel, detailsSidebarPanelConstructors);
@@ -40,6 +39,11 @@ WI.DebuggerTabContentView = class DebuggerTabContentView extends WI.ContentBrows
             image: "Images/Debugger.svg",
             title: WI.UIString("Debugger"),
         };
+    }
+
+    static isTabAllowed()
+    {
+        return !WI.settings.experimentalEnableSourcesTab.value;
     }
 
     // Public

@@ -78,7 +78,6 @@ WI.TabBrowser = class TabBrowser extends WI.View
         this._tabBar.addEventListener(WI.TabBar.Event.TabBarItemSelected, this._tabBarItemSelected, this);
         this._tabBar.addEventListener(WI.TabBar.Event.TabBarItemAdded, this._tabBarItemAdded, this);
         this._tabBar.addEventListener(WI.TabBar.Event.TabBarItemRemoved, this._tabBarItemRemoved, this);
-        this._tabBar.newTabTabBarItem.addEventListener(WI.PinnedTabBarItem.Event.ContextMenu, this._handleNewTabContextMenu, this);
 
         this._recentTabContentViews = [];
         this._closedTabClasses = new Set;
@@ -122,14 +121,14 @@ WI.TabBrowser = class TabBrowser extends WI.View
     {
         console.assert(!this.selectedTabContentView || this.selectedTabContentView === this._recentTabContentViews[0]);
 
+        let tabContentView = this._recentTabContentViews.find((tabContentView) => tabContentView.type === options.preferredTabType);
+        if (tabContentView && tabContentView.canShowRepresentedObject(representedObject))
+            return tabContentView;
+
         for (let tabContentView of this._recentTabContentViews) {
             if (options.ignoreSearchTab && tabContentView instanceof WI.SearchTabContentView)
                 continue;
             if (options.ignoreNetworkTab && tabContentView instanceof WI.NetworkTabContentView)
-                continue;
-            if (options.ignoreResourcesTab && tabContentView instanceof WI.ResourcesTabContentView)
-                continue;
-            if (options.ignoreDebuggerTab && tabContentView instanceof WI.DebuggerTabContentView)
                 continue;
 
             if (tabContentView.canShowRepresentedObject(representedObject))
@@ -154,8 +153,6 @@ WI.TabBrowser = class TabBrowser extends WI.View
         if (tabBarItem.representedObject !== tabContentView)
             tabBarItem.representedObject = tabContentView;
 
-        tabContentView.parentTabBrowser = this;
-
         if (tabBarItem.parentTabBar === this._tabBar)
             return true;
 
@@ -171,7 +168,7 @@ WI.TabBrowser = class TabBrowser extends WI.View
         else
             this._tabBar.addTabBarItem(tabBarItem, options);
 
-        console.assert(this._recentTabContentViews.length === this._tabBar.normalTabCount);
+        console.assert(this._recentTabContentViews.length === this._tabBar.saveableTabCount);
         console.assert(!this.selectedTabContentView || this.selectedTabContentView === this._recentTabContentViews[0]);
 
         return true;
@@ -182,8 +179,7 @@ WI.TabBrowser = class TabBrowser extends WI.View
         if (!this.addTabForContentView(tabContentView, options))
             return false;
 
-        if (!options.suppressSelection)
-            this._tabBar.selectedTabBarItem = tabContentView.tabBarItem;
+        this._tabBar.selectedTabBarItem = tabContentView.tabBarItem;
 
         // FIXME: this is a workaround for <https://webkit.org/b/151876>.
         // Without this extra call, we might never lay out the child tab
@@ -210,7 +206,7 @@ WI.TabBrowser = class TabBrowser extends WI.View
 
         this._tabBar.removeTabBarItem(tabContentView.tabBarItem, options);
 
-        console.assert(this._recentTabContentViews.length === this._tabBar.normalTabCount);
+        console.assert(this._recentTabContentViews.length === this._tabBar.saveableTabCount);
         console.assert(!this.selectedTabContentView || this.selectedTabContentView === this._recentTabContentViews[0]);
 
         return true;
@@ -218,10 +214,9 @@ WI.TabBrowser = class TabBrowser extends WI.View
 
     // Protected
 
-    layout()
+    sizeDidChange()
     {
-        if (this.layoutReason !== WI.View.LayoutReason.Resize)
-            return;
+        super.sizeDidChange();
 
         for (let tabContentView of this._recentTabContentViews)
             tabContentView[WI.TabBrowser.NeedsResizeLayoutSymbol] = tabContentView !== this.selectedTabContentView;
@@ -234,8 +229,8 @@ WI.TabBrowser = class TabBrowser extends WI.View
         let tabContentView = this._tabBar.selectedTabBarItem ? this._tabBar.selectedTabBarItem.representedObject : null;
 
         if (tabContentView) {
-            let isSettingsTab = tabContentView instanceof WI.SettingsTabContentView;
-            if (!isSettingsTab) {
+            let shouldSaveTab = tabContentView.constructor.shouldSaveTab();
+            if (shouldSaveTab) {
                 this._recentTabContentViews.remove(tabContentView);
                 this._recentTabContentViews.unshift(tabContentView);
             }
@@ -243,8 +238,8 @@ WI.TabBrowser = class TabBrowser extends WI.View
             this._contentViewContainer.showContentView(tabContentView);
 
             console.assert(this.selectedTabContentView);
-            console.assert(this._recentTabContentViews.length === this._tabBar.normalTabCount);
-            console.assert(this.selectedTabContentView === this._recentTabContentViews[0] || isSettingsTab);
+            console.assert(this._recentTabContentViews.length === this._tabBar.saveableTabCount);
+            console.assert(this.selectedTabContentView === this._recentTabContentViews[0] || !shouldSaveTab);
         } else {
             this._contentViewContainer.closeAllContentViews();
 
@@ -284,44 +279,13 @@ WI.TabBrowser = class TabBrowser extends WI.View
 
         this._recentTabContentViews.remove(tabContentView);
 
-        if (!tabContentView.constructor.isEphemeral())
+        if (!tabContentView.constructor.tabInfo().isEphemeral)
             this._closedTabClasses.add(tabContentView.constructor);
 
         this._contentViewContainer.closeContentView(tabContentView);
 
-        tabContentView.parentTabBrowser = null;
-
-        console.assert(this._recentTabContentViews.length === this._tabBar.normalTabCount);
+        console.assert(this._recentTabContentViews.length === this._tabBar.saveableTabCount);
         console.assert(!this.selectedTabContentView || this.selectedTabContentView === this._recentTabContentViews[0]);
-    }
-
-    _handleNewTabContextMenu(event)
-    {
-        // The array must be reversed because Sets insert into the end, and we want to display the
-        // most recently closed item first (which is the last item added to the set).
-        let closedTabClasses = Array.from(this._closedTabClasses).reverse();
-        let allTabClasses = Array.from(WI.knownTabClasses());
-        let tabClassesToDisplay = closedTabClasses.concat(allTabClasses.filter((tabClass) => {
-            if (closedTabClasses.includes(tabClass))
-                return false;
-
-            if (tabClass.isEphemeral())
-                return false;
-
-            return WI.isNewTabWithTypeAllowed(tabClass.Type);
-        }));
-        if (!tabClassesToDisplay.length)
-            return;
-
-        let contextMenu = event.data.contextMenu;
-
-        contextMenu.appendItem(WI.UIString("Recently Closed Tabs"), null, true);
-
-        for (let tabClass of tabClassesToDisplay) {
-            contextMenu.appendItem(tabClass.tabInfo().title, () => {
-                WI.createNewTabWithType(tabClass.Type, {shouldShowNewTab: true});
-            });
-        }
     }
 
     _sidebarPanelSelected(event)
@@ -351,7 +315,7 @@ WI.TabBrowser = class TabBrowser extends WI.View
         if (!tabContentView)
             return;
 
-        if (event.target === this._navigationSidebar)
+        if (event.target === this._navigationSidebar && !tabContentView.managesNavigationSidebarPanel)
             tabContentView.navigationSidebarCollapsedSetting.value = this._navigationSidebar.collapsed;
         else if (event.target === this._detailsSidebar && !tabContentView.managesDetailsSidebarPanels)
             tabContentView.detailsSidebarCollapsedSetting.value = this._detailsSidebar.collapsed;
@@ -399,6 +363,12 @@ WI.TabBrowser = class TabBrowser extends WI.View
         var navigationSidebarPanel = tabContentView.navigationSidebarPanel;
         if (!navigationSidebarPanel) {
             this._navigationSidebar.collapsed = true;
+            this._ignoreSidebarEvents = false;
+            return;
+        }
+
+        if (tabContentView.managesNavigationSidebarPanel) {
+            tabContentView.showNavigationSidebarPanel();
             this._ignoreSidebarEvents = false;
             return;
         }

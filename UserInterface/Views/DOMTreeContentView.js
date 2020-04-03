@@ -33,41 +33,55 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
         this._compositingBordersButtonNavigationItem = new WI.ActivateButtonNavigationItem("layer-borders", WI.UIString("Show compositing borders"), WI.UIString("Hide compositing borders"), "Images/LayerBorders.svg", 13, 13);
         this._compositingBordersButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._toggleCompositingBorders, this);
-        this._compositingBordersButtonNavigationItem.enabled = !!PageAgent.getCompositingBordersVisible;
+        this._compositingBordersButtonNavigationItem.enabled = !!InspectorBackend.domains.Page;
         this._compositingBordersButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
 
-        WI.showPaintRectsSetting.addEventListener(WI.Setting.Event.Changed, this._showPaintRectsSettingChanged, this);
+        // COMPATIBILITY (iOS 9)
+        WI.settings.showPaintRects.addEventListener(WI.Setting.Event.Changed, this._showPaintRectsSettingChanged, this);
         this._paintFlashingButtonNavigationItem = new WI.ActivateButtonNavigationItem("paint-flashing", WI.UIString("Enable paint flashing"), WI.UIString("Disable paint flashing"), "Images/Paint.svg", 16, 16);
         this._paintFlashingButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._togglePaintFlashing, this);
-        this._paintFlashingButtonNavigationItem.enabled = !!PageAgent.setShowPaintRects;
-        this._paintFlashingButtonNavigationItem.activated = PageAgent.setShowPaintRects && WI.showPaintRectsSetting.value;
+        this._paintFlashingButtonNavigationItem.enabled = InspectorBackend.domains.Page && !!InspectorBackend.domains.Page.setShowPaintRects;
+        this._paintFlashingButtonNavigationItem.activated = InspectorBackend.domains.Page && InspectorBackend.domains.Page.setShowPaintRects && WI.settings.showPaintRects.value;
         this._paintFlashingButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
 
-        WI.showShadowDOMSetting.addEventListener(WI.Setting.Event.Changed, this._showShadowDOMSettingChanged, this);
+        WI.settings.showShadowDOM.addEventListener(WI.Setting.Event.Changed, this._showShadowDOMSettingChanged, this);
         this._showsShadowDOMButtonNavigationItem = new WI.ActivateButtonNavigationItem("shows-shadow-DOM", WI.UIString("Show shadow DOM nodes"), WI.UIString("Hide shadow DOM nodes"), "Images/ShadowDOM.svg", 13, 13);
         this._showsShadowDOMButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._toggleShowsShadowDOMSetting, this);
         this._showsShadowDOMButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
         this._showShadowDOMSettingChanged();
 
-        WI.showPrintStylesSetting.addEventListener(WI.Setting.Event.Changed, this._showPrintStylesSettingChanged, this);
-        this._showPrintStylesButtonNavigationItem = new WI.ActivateButtonNavigationItem("print-styles", WI.UIString("Force Print Media Styles"), WI.UIString("Use Default Media Styles"), "Images/Printer.svg", 16, 16);
-        this._showPrintStylesButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._togglePrintStylesSetting, this);
+        this._showPrintStylesButtonNavigationItem = new WI.ActivateButtonNavigationItem("print-styles", WI.UIString("Force print media styles"), WI.UIString("Use default media styles"), "Images/Printer.svg", 16, 16);
+        this._showPrintStylesButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._togglePrintStyles, this);
+        this._showPrintStylesButtonNavigationItem.enabled = !!InspectorBackend.domains.Page;
         this._showPrintStylesButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
-        this._showPrintStylesSettingChanged();
+        this._showPrintStylesChanged();
+
+        // COMPATIBILITY (iOS 12)
+        WI.settings.showRulers.addEventListener(WI.Setting.Event.Changed, this._showRulersChanged, this);
+        this._showRulersButtonNavigationItem = new WI.ActivateButtonNavigationItem("show-rulers", WI.UIString("Show rulers"), WI.UIString("Hide rulers"), "Images/Rulers.svg", 16, 16);
+        this._showRulersButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._toggleShowRulers, this);
+        this._showRulersButtonNavigationItem.enabled = InspectorBackend.domains.Page && !!InspectorBackend.domains.Page.setShowRulers;
+        this._showRulersButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
+        this._showRulersChanged();
 
         this.element.classList.add("dom-tree");
         this.element.addEventListener("click", this._mouseWasClicked.bind(this), false);
 
-        this._domTreeOutline = new WI.DOMTreeOutline(true, true, true);
+        this._domTreeOutline = new WI.DOMTreeOutline({omitRootDOMNode: true, excludeRevealElementContextMenu: true, showLastSelected: true});
+        this._domTreeOutline.allowsEmptySelection = false;
+        this._domTreeOutline.allowsMultipleSelection = true;
         this._domTreeOutline.addEventListener(WI.TreeOutline.Event.ElementAdded, this._domTreeElementAdded, this);
+        this._domTreeOutline.addEventListener(WI.TreeOutline.Event.SelectionDidChange, this._domTreeSelectionDidChange, this);
         this._domTreeOutline.addEventListener(WI.DOMTreeOutline.Event.SelectedNodeChanged, this._selectedNodeDidChange, this);
         this._domTreeOutline.wireToDomAgent();
         this._domTreeOutline.editable = true;
         this.element.appendChild(this._domTreeOutline.element);
 
-        WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.AttributeModified, this._domNodeChanged, this);
-        WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.AttributeRemoved, this._domNodeChanged, this);
-        WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.CharacterDataModified, this._domNodeChanged, this);
+        WI.domManager.addEventListener(WI.DOMManager.Event.AttributeModified, this._domNodeChanged, this);
+        WI.domManager.addEventListener(WI.DOMManager.Event.AttributeRemoved, this._domNodeChanged, this);
+        WI.domManager.addEventListener(WI.DOMManager.Event.CharacterDataModified, this._domNodeChanged, this);
+
+        WI.cssManager.addEventListener(WI.CSSManager.Event.DefaultAppearanceDidChange, this._defaultAppearanceDidChange, this);
 
         this._lastSelectedNodePathSetting = new WI.Setting("last-selected-node-path", null);
 
@@ -76,14 +90,16 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
         this._breakpointGutterEnabled = false;
         this._pendingBreakpointNodeIdentifiers = new Set;
 
+        this._defaultAppearanceDidChange();
+
         if (WI.domDebuggerManager.supported) {
             WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.BreakpointsEnabledDidChange, this._breakpointsEnabledDidChange, this);
 
             WI.domDebuggerManager.addEventListener(WI.DOMDebuggerManager.Event.DOMBreakpointAdded, this._domBreakpointAddedOrRemoved, this);
             WI.domDebuggerManager.addEventListener(WI.DOMDebuggerManager.Event.DOMBreakpointRemoved, this._domBreakpointAddedOrRemoved, this);
 
-            WI.DOMBreakpoint.addEventListener(WI.DOMBreakpoint.Event.DisabledStateDidChange, this._domBreakpointDisabledStateDidChange, this);
-            WI.DOMBreakpoint.addEventListener(WI.DOMBreakpoint.Event.ResolvedStateDidChange, this._domBreakpointResolvedStateDidChange, this);
+            WI.DOMBreakpoint.addEventListener(WI.DOMBreakpoint.Event.DisabledStateChanged, this._handleDOMBreakpointDisabledStateChanged, this);
+            WI.DOMBreakpoint.addEventListener(WI.DOMBreakpoint.Event.DOMNodeChanged, this._handleDOMBreakpointDOMNodeChanged, this);
 
             this._breakpointsEnabledDidChange();
         }
@@ -93,11 +109,14 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     get navigationItems()
     {
-        let items = [this._showPrintStylesButtonNavigationItem, this._showsShadowDOMButtonNavigationItem];
-        if (!WI.settings.experimentalEnableLayersTab.value)
-            items.push(this._compositingBordersButtonNavigationItem, this._paintFlashingButtonNavigationItem);
-
-        return items;
+        return [
+            this._showRulersButtonNavigationItem,
+            this._showPrintStylesButtonNavigationItem,
+            this._forceAppearanceButtonNavigationItem,
+            this._compositingBordersButtonNavigationItem,
+            this._paintFlashingButtonNavigationItem,
+            this._showsShadowDOMButtonNavigationItem,
+        ];
     }
 
     get domTreeOutline()
@@ -141,7 +160,7 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
     {
         super.hidden();
 
-        WI.domTreeManager.hideDOMNodeHighlight();
+        WI.domManager.hideDOMNodeHighlight();
         this._domTreeOutline.setVisible(false);
     }
 
@@ -149,10 +168,11 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
     {
         super.closed();
 
-        WI.showPaintRectsSetting.removeEventListener(null, null, this);
-        WI.showShadowDOMSetting.removeEventListener(null, null, this);
+        WI.settings.showPaintRects.removeEventListener(null, null, this);
+        WI.settings.showShadowDOM.removeEventListener(null, null, this);
+        WI.settings.showRulers.removeEventListener(null, null, this);
         WI.debuggerManager.removeEventListener(null, null, this);
-        WI.domTreeManager.removeEventListener(null, null, this);
+        WI.domManager.removeEventListener(null, null, this);
         WI.domDebuggerManager.removeEventListener(null, null, this);
         WI.DOMBreakpoint.removeEventListener(null, null, this);
 
@@ -209,6 +229,19 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
         event.preventDefault();
 
         selectedDOMNode.copyNode();
+    }
+
+    handlePasteEvent(event)
+    {
+        let selectedDOMNode = this._domTreeOutline.selectedDOMNode();
+        if (!selectedDOMNode)
+            return;
+
+        let text = event.clipboardData.getData("text/plain");
+        if (!text)
+            return;
+
+        selectedDOMNode.insertAdjacentHTML("afterend", text);
     }
 
     get supportsSave()
@@ -280,7 +313,15 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
         function contextNodesReady(nodeIds)
         {
-            DOMAgent.performSearch(query, nodeIds, searchResultsReady.bind(this));
+            if (this._searchQuery !== query)
+                return;
+
+            let commandArguments = {
+                query: this._searchQuery,
+                nodeIds,
+                caseSensitive: WI.SearchUtilities.defaultSettings.caseSensitive.value,
+            };
+            DOMAgent.performSearch.invoke(commandArguments, searchResultsReady.bind(this));
         }
 
         this.getSearchContextNodes(contextNodesReady.bind(this));
@@ -334,9 +375,18 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     // Protected
 
+    sizeDidChange()
+    {
+        super.sizeDidChange();
+
+        this._domTreeOutline.selectDOMNode(this._domTreeOutline.selectedDOMNode());
+    }
+
     layout()
     {
-        this._domTreeOutline.updateSelection();
+        super.layout();
+
+        this._domTreeOutline.updateSelectionArea();
     }
 
     // Private
@@ -358,7 +408,7 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
             console.assert(nodeIdentifiers.length === 1);
 
-            var domNode = WI.domTreeManager.nodeForId(nodeIdentifiers[0]);
+            var domNode = WI.domManager.nodeForId(nodeIdentifiers[0]);
             console.assert(domNode);
             if (!domNode)
                 return;
@@ -375,7 +425,7 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     _restoreSelectedNodeAfterUpdate(documentURL, defaultNode)
     {
-        if (!WI.domTreeManager.restoreSelectedNodeIsAllowed)
+        if (!WI.domManager.restoreSelectedNodeIsAllowed)
             return;
 
         function selectNode(lastSelectedNode)
@@ -398,14 +448,14 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
         function selectLastSelectedNode(nodeId)
         {
-            if (!WI.domTreeManager.restoreSelectedNodeIsAllowed)
+            if (!WI.domManager.restoreSelectedNodeIsAllowed)
                 return;
 
-            selectNode.call(this, WI.domTreeManager.nodeForId(nodeId));
+            selectNode.call(this, WI.domManager.nodeForId(nodeId));
         }
 
         if (documentURL && this._lastSelectedNodePathSetting.value && this._lastSelectedNodePathSetting.value.path && this._lastSelectedNodePathSetting.value.url === documentURL.hash)
-            WI.domTreeManager.pushNodeByPathToFrontend(this._lastSelectedNodePathSetting.value.path, selectLastSelectedNode.bind(this));
+            WI.domManager.pushNodeByPathToFrontend(this._lastSelectedNodePathSetting.value.path, selectLastSelectedNode.bind(this));
         else
             selectNode.call(this);
     }
@@ -427,14 +477,30 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
         this._updateBreakpointStatus(node.id);
     }
 
+    _domTreeSelectionDidChange(event)
+    {
+        let treeElement = this._domTreeOutline.selectedTreeElement;
+        let domNode = treeElement ? treeElement.representedObject : null;
+        let selectedByUser = event.data.selectedByUser;
+
+        this._domTreeOutline.suppressRevealAndSelect = true;
+        this._domTreeOutline.selectDOMNode(domNode, selectedByUser);
+
+        if (domNode && selectedByUser)
+            WI.domManager.highlightDOMNode(domNode.id);
+
+        this._domTreeOutline.updateSelectionArea();
+        this._domTreeOutline.suppressRevealAndSelect = false;
+    }
+
     _selectedNodeDidChange(event)
     {
         var selectedDOMNode = this._domTreeOutline.selectedDOMNode();
         if (selectedDOMNode && !this._dontSetLastSelectedNodePath)
-            this._lastSelectedNodePathSetting.value = {url: WI.frameResourceManager.mainFrame.url.hash, path: selectedDOMNode.path()};
+            this._lastSelectedNodePathSetting.value = {url: WI.networkManager.mainFrame.url.hash, path: selectedDOMNode.path()};
 
         if (selectedDOMNode)
-            WI.domTreeManager.setInspectedNode(selectedDOMNode);
+            WI.domManager.setInspectedNode(selectedDOMNode);
 
         this.dispatchEventToListeners(WI.ContentView.Event.SelectionPathComponentsDidChange);
     }
@@ -461,7 +527,7 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     _mouseWasClicked(event)
     {
-        var anchorElement = event.target.enclosingNodeOrSelfWithNodeName("a");
+        var anchorElement = event.target.closest("a");
         if (!anchorElement || !anchorElement.href)
             return;
 
@@ -506,21 +572,30 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     _toggleCompositingBorders(event)
     {
-        console.assert(PageAgent.setCompositingBordersVisible);
-
         var activated = !this._compositingBordersButtonNavigationItem.activated;
         this._compositingBordersButtonNavigationItem.activated = activated;
-        PageAgent.setCompositingBordersVisible(activated);
+
+        for (let target of WI.targets) {
+            if (target.PageAgent)
+                target.PageAgent.setCompositingBordersVisible(activated);
+        }
     }
 
     _togglePaintFlashing(event)
     {
-        WI.showPaintRectsSetting.value = !WI.showPaintRectsSetting.value;
+        WI.settings.showPaintRects.value = !WI.settings.showPaintRects.value;
     }
 
     _updateCompositingBordersButtonToMatchPageSettings()
     {
-        if (WI.settings.experimentalEnableLayersTab.value)
+        if (!WI.targetsAvailable()) {
+            WI.whenTargetsAvailable().then(() => {
+                this._updateCompositingBordersButtonToMatchPageSettings();
+            });
+            return;
+        }
+
+        if (!window.PageAgent)
             return;
 
         var button = this._compositingBordersButtonNavigationItem;
@@ -535,36 +610,116 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     _showPaintRectsSettingChanged(event)
     {
-        console.assert(PageAgent.setShowPaintRects);
+        let activated = WI.settings.showPaintRects.value;
+        this._paintFlashingButtonNavigationItem.activated = activated;
 
-        this._paintFlashingButtonNavigationItem.activated = WI.showPaintRectsSetting.value;
-
-        PageAgent.setShowPaintRects(this._paintFlashingButtonNavigationItem.activated);
+        for (let target of WI.targets) {
+            if (target.PageAgent && target.PageAgent.setShowPaintRects)
+                target.PageAgent.setShowPaintRects(activated);
+        }
     }
 
     _showShadowDOMSettingChanged(event)
     {
-        this._showsShadowDOMButtonNavigationItem.activated = WI.showShadowDOMSetting.value;
+        this._showsShadowDOMButtonNavigationItem.activated = WI.settings.showShadowDOM.value;
     }
 
     _toggleShowsShadowDOMSetting(event)
     {
-        WI.showShadowDOMSetting.value = !WI.showShadowDOMSetting.value;
+        WI.settings.showShadowDOM.value = !WI.settings.showShadowDOM.value;
     }
 
-    _showPrintStylesSettingChanged(event)
+    _showPrintStylesChanged()
     {
-        this._showPrintStylesButtonNavigationItem.activated = WI.showPrintStylesSetting.value;
+        this._showPrintStylesButtonNavigationItem.activated = WI.printStylesEnabled;
+
+        let mediaType = WI.printStylesEnabled ? "print" : "";
+        for (let target of WI.targets) {
+            if (target.PageAgent)
+                target.PageAgent.setEmulatedMedia(mediaType);
+        }
+
+        WI.cssManager.mediaTypeChanged();
     }
 
-    _togglePrintStylesSetting(event)
+    _togglePrintStyles(event)
     {
-        WI.showPrintStylesSetting.value = !WI.showPrintStylesSetting.value;
+        WI.printStylesEnabled = !WI.printStylesEnabled;
+        this._showPrintStylesChanged();
+    }
 
-        let mediaType = WI.showPrintStylesSetting.value ? "print" : "";
-        PageAgent.setEmulatedMedia(mediaType);
+    _defaultAppearanceDidChange()
+    {
+        // Don't update the navigation item if there is currently a forced appearance.
+        // The user will need to toggle it off to update it based on the new default appearance.
+        if (WI.cssManager.forcedAppearance)
+            return;
 
-        WI.cssStyleManager.mediaTypeChanged();
+        this._forceAppearanceButtonNavigationItem = null;
+
+        let defaultAppearance = WI.cssManager.defaultAppearance;
+        switch (defaultAppearance) {
+        case WI.CSSManager.Appearance.Light:
+        case null: // if there is no default appearance, the navigation item will be disabled
+            this._forceAppearanceButtonNavigationItem = new WI.ActivateButtonNavigationItem("appearance", WI.UIString("Force Dark Appearance"), WI.UIString("Use Default Appearance"), "Images/Appearance.svg", 16, 16);
+            break;
+        case WI.CSSManager.Appearance.Dark:
+            this._forceAppearanceButtonNavigationItem = new WI.ActivateButtonNavigationItem("appearance", WI.UIString("Force Light Appearance"), WI.UIString("Use Default Appearance"), "Images/Appearance.svg", 16, 16);
+            break;
+        }
+
+        this._lastKnownDefaultAppearance = defaultAppearance;
+
+        this._forceAppearanceButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._toggleAppearance, this);
+        this._forceAppearanceButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
+        this._forceAppearanceButtonNavigationItem.enabled = WI.cssManager.canForceAppearance();
+        this._forceAppearanceButtonNavigationItem.activated = !!WI.cssManager.forcedAppearance;
+
+        this.dispatchEventToListeners(WI.ContentView.Event.NavigationItemsDidChange);
+    }
+
+    _toggleAppearance(event)
+    {
+        console.assert(WI.cssManager.canForceAppearance());
+
+        // Use the last known default appearance, since that is the appearance this navigation item was generated for.
+        let appearanceToForce = null;
+        switch (this._lastKnownDefaultAppearance) {
+        case WI.CSSManager.Appearance.Light:
+            appearanceToForce = WI.CSSManager.Appearance.Dark;
+            break;
+        case WI.CSSManager.Appearance.Dark:
+            appearanceToForce = WI.CSSManager.Appearance.Light;
+            break;
+        }
+
+        console.assert(appearanceToForce);
+        WI.cssManager.forcedAppearance = WI.cssManager.forcedAppearance == appearanceToForce ? null : appearanceToForce;
+
+        // When no longer forcing an appearance, if the last known default appearance is different than the current
+        // default appearance, then update the navigation button now. Otherwise just toggle the activated state.
+        if (!WI.cssManager.forcedAppearance && this._lastKnownDefaultAppearance !== WI.cssManager.defaultAppearance)
+            this._defaultAppearanceDidChange();
+        else
+            this._forceAppearanceButtonNavigationItem.activated = !!WI.cssManager.forcedAppearance;
+    }
+
+    _showRulersChanged()
+    {
+        let activated = WI.settings.showRulers.value;
+        this._showRulersButtonNavigationItem.activated = activated;
+
+        for (let target of WI.targets) {
+            if (target.PageAgent && target.PageAgent.setShowRulers)
+                target.PageAgent.setShowRulers(activated);
+        }
+    }
+
+    _toggleShowRulers(event)
+    {
+        WI.settings.showRulers.value = !WI.settings.showRulers.value;
+
+        this._showRulersChanged();
     }
 
     _showSearchHighlights()
@@ -585,7 +740,7 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
             console.assert(nodeIdentifiers.length === this._numberOfSearchResults);
 
             for (var i = 0; i < nodeIdentifiers.length; ++i) {
-                var domNode = WI.domTreeManager.nodeForId(nodeIdentifiers[i]);
+                var domNode = WI.domManager.nodeForId(nodeIdentifiers[i]);
                 console.assert(domNode);
                 if (!domNode)
                     continue;
@@ -620,13 +775,13 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
         this._updateBreakpointStatus(breakpoint.domNodeIdentifier);
     }
 
-    _domBreakpointDisabledStateDidChange(event)
+    _handleDOMBreakpointDisabledStateChanged(event)
     {
         let breakpoint = event.target;
         this._updateBreakpointStatus(breakpoint.domNodeIdentifier);
     }
 
-    _domBreakpointResolvedStateDidChange(event)
+    _handleDOMBreakpointDOMNodeChanged(event)
     {
         let breakpoint = event.target;
         let nodeIdentifier = breakpoint.domNodeIdentifier || event.data.oldNodeIdentifier;
@@ -635,7 +790,7 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
 
     _updateBreakpointStatus(nodeIdentifier)
     {
-        let domNode = WI.domTreeManager.nodeForId(nodeIdentifier);
+        let domNode = WI.domManager.nodeForId(nodeIdentifier);
         if (!domNode)
             return;
 
@@ -646,15 +801,15 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
         }
 
         let breakpoints = WI.domDebuggerManager.domBreakpointsForNode(domNode);
-        if (!breakpoints.length) {
+        if (breakpoints.length) {
+            if (breakpoints.some((item) => item.disabled))
+                treeElement.breakpointStatus = WI.DOMTreeElement.BreakpointStatus.DisabledBreakpoint;
+            else
+                treeElement.breakpointStatus = WI.DOMTreeElement.BreakpointStatus.Breakpoint;
+        } else
             treeElement.breakpointStatus = WI.DOMTreeElement.BreakpointStatus.None;
-            return;
-        }
 
-        this.breakpointGutterEnabled = true;
-
-        let disabled = breakpoints.some((item) => item.disabled);
-        treeElement.breakpointStatus = disabled ? WI.DOMTreeElement.BreakpointStatus.DisabledBreakpoint : WI.DOMTreeElement.BreakpointStatus.Breakpoint;
+        this.breakpointGutterEnabled = this._domTreeOutline.children.some((child) => child.hasBreakpoint);
     }
 
     _restoreBreakpointsAfterUpdate()

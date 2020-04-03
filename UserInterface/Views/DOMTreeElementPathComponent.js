@@ -45,12 +45,12 @@ WI.DOMTreeElementPathComponent = class DOMTreeElementPathComponent extends WI.Hi
 
         case Node.TEXT_NODE:
             className = WI.DOMTreeElementPathComponent.DOMTextNodeIconStyleClassName;
-            title = "\"" + node.nodeValue().trimEnd(32) + "\"";
+            title = "\"" + node.nodeValue().truncateEnd(32) + "\"";
             break;
 
         case Node.COMMENT_NODE:
             className = WI.DOMTreeElementPathComponent.DOMCommentIconStyleClassName;
-            title = "<!--" + node.nodeValue().trimEnd(32) + "-->";
+            title = "<!--" + node.nodeValue().truncateEnd(32) + "-->";
             break;
 
         case Node.DOCUMENT_TYPE_NODE:
@@ -65,7 +65,7 @@ WI.DOMTreeElementPathComponent = class DOMTreeElementPathComponent extends WI.Hi
 
         case Node.CDATA_SECTION_NODE:
             className = WI.DOMTreeElementPathComponent.DOMCharacterDataIconStyleClassName;
-            title = "<![CDATA[" + node.trimEnd(32) + "]]>";
+            title = "<![CDATA[" + node.truncateEnd(32) + "]]>";
             break;
 
         case Node.DOCUMENT_FRAGMENT_NODE:
@@ -124,12 +124,12 @@ WI.DOMTreeElementPathComponent = class DOMTreeElementPathComponent extends WI.Hi
     mouseOver()
     {
         var nodeId = this._domTreeElement.representedObject.id;
-        WI.domTreeManager.highlightDOMNode(nodeId);
+        WI.domManager.highlightDOMNode(nodeId);
     }
 
     mouseOut()
     {
-        WI.domTreeManager.hideDOMNodeHighlight();
+        WI.domManager.hideDOMNodeHighlight();
     }
 };
 

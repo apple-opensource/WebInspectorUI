@@ -34,8 +34,8 @@ WI.EventListenerSectionGroup = class EventListenerSectionGroup extends WI.Detail
         var rows = [];
         if (!options.hideType)
             rows.push(new WI.DetailsSectionSimpleRow(WI.UIString("Event"), this._eventListener.type));
-        if (!options.hideNode)
-            rows.push(new WI.DetailsSectionSimpleRow(WI.UIString("Node"), this._nodeTextOrLink()));
+        if (!options.hideTarget)
+            rows.push(new WI.DetailsSectionSimpleRow(WI.UIString("Target"), this._targetTextOrLink()));
         rows.push(new WI.DetailsSectionSimpleRow(WI.UIString("Function"), this._functionTextOrLink()));
 
         if (this._eventListener.useCapture)
@@ -52,36 +52,47 @@ WI.EventListenerSectionGroup = class EventListenerSectionGroup extends WI.Detail
         if (this._eventListener.once)
             rows.push(new WI.DetailsSectionSimpleRow(WI.UIString("Once"), WI.UIString("Yes")));
 
-        if (DOMAgent.setEventListenerDisabled && this._eventListener.eventListenerId)
-            rows.push(this._createDisabledToggleRow());
+        if (this._eventListener.eventListenerId) {
+            if (DOMAgent.setEventListenerDisabled)
+                rows.push(this._createDisabledToggleRow());
+
+            if (DOMAgent.setBreakpointForEventListener && DOMAgent.removeBreakpointForEventListener)
+                rows.push(this._createBreakpointToggleRow());
+        }
 
         this.rows = rows;
     }
 
     // Private
 
-    _nodeTextOrLink()
+    _targetTextOrLink()
     {
-        var node = this._eventListener.node;
-        console.assert(node);
-        if (!node)
-            return "";
+        if (this._eventListener.onWindow)
+            return WI.unlocalizedString("window");
 
-        if (node.nodeType() === Node.DOCUMENT_NODE)
-            return "document";
+        let node = this._eventListener.node;
+        if (node)
+            return WI.linkifyNodeReference(node);
 
-        return WI.linkifyNodeReference(node);
+        console.assert();
+        return "";
     }
 
     _functionTextOrLink()
     {
-        var match = this._eventListener.handlerBody.match(/function ([^\(]+?)\(/);
-        if (match) {
-            var anonymous = false;
-            var functionName = match[1];
-        } else {
-            var anonymous = true;
-            var functionName = WI.UIString("(anonymous function)");
+        let anonymous = false;
+        let functionName = this._eventListener.handlerName;
+
+        // COMPATIBILITY (iOS 12.2): DOM.EventListener.handlerBody was replaced by DOM.EventListener.handlerName.
+        if (!functionName && this._eventListener.handlerBody) {
+            let match = this._eventListener.handlerBody.match(/function ([^\(]+?)\(/);
+            if (match)
+                functionName = match[1];
+        }
+
+        if (!functionName) {
+            anonymous = true;
+            functionName = WI.UIString("(anonymous function)");
         }
 
         if (!this._eventListener.location)
@@ -125,7 +136,7 @@ WI.EventListenerSectionGroup = class EventListenerSectionGroup extends WI.Detail
 
         toggleElement.addEventListener("change", (event) => {
             this._eventListener.disabled = !toggleElement.checked;
-            WI.domTreeManager.setEventListenerDisabled(this._eventListener.eventListenerId, this._eventListener.disabled);
+            WI.domManager.setEventListenerDisabled(this._eventListener, this._eventListener.disabled);
             updateTitle();
         });
 
@@ -136,5 +147,39 @@ WI.EventListenerSectionGroup = class EventListenerSectionGroup extends WI.Detail
         });
 
         return new WI.DetailsSectionSimpleRow(toggleLabel, toggleElement);
+    }
+
+    _createBreakpointToggleRow()
+    {
+        let checkboxElement = document.createElement("input");
+        checkboxElement.type = "checkbox";
+        checkboxElement.checked = !!this._eventListener.hasBreakpoint;
+
+        let updateTitle = () => {
+            if (this._eventListener.hasBreakpoint)
+                checkboxElement.title = WI.UIString("Delete Breakpoint");
+            else
+                checkboxElement.title = WI.UIString("Add Breakpoint");
+        };
+
+        updateTitle();
+
+        checkboxElement.addEventListener("change", (event) => {
+            this._eventListener.hasBreakpoint = !!checkboxElement.checked;
+            if (this._eventListener.hasBreakpoint)
+                WI.domManager.setBreakpointForEventListener(this._eventListener);
+            else
+                WI.domManager.removeBreakpointForEventListener(this._eventListener);
+
+            updateTitle();
+        });
+
+        let labelElement = document.createElement("span");
+        labelElement.textContent = WI.UIString("Breakpoint");
+        labelElement.addEventListener("click", (event) => {
+            checkboxElement.click();
+        });
+
+        return new WI.DetailsSectionSimpleRow(labelElement, checkboxElement);
     }
 };

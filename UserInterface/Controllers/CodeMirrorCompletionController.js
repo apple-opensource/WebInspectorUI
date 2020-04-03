@@ -475,8 +475,8 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
         var cursor = this._codeMirror.getCursor();
         var token = this._codeMirror.getTokenAt(cursor);
 
-        // Don't try to complete inside comments.
-        if (token.type && /\bcomment\b/.test(token.type)) {
+        // Don't try to complete inside comments or strings.
+        if (token.type && /\b(comment|string)\b/.test(token.type)) {
             this.hideCompletions();
             return;
         }
@@ -661,7 +661,7 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
             "return", "static", "super", "switch", "this", "throw", "true", "try",
             "typeof", "undefined", "var", "void", "while", "with", "yield"
         ];
-        var valueKeywords = ["false", "Infinity", "NaN", "null", "this", "true", "undefined"];
+        var valueKeywords = ["false", "Infinity", "NaN", "null", "this", "true", "undefined", "globalThis"];
 
         var allowedKeywordsInsideBlocks = allKeywords.keySet();
         var allowedKeywordsWhenDeclaringVariable = valueKeywords.keySet();

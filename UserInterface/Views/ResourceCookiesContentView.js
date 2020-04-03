@@ -56,7 +56,27 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         table.reloadData();
     }
 
+    tableIndexForRepresentedObject(table, object)
+    {
+        let cookies = this._dataSourceForTable(table);
+        let index = cookies.indexOf(object);
+        console.assert(index >= 0);
+        return index;
+    }
+
+    tableRepresentedObjectForIndex(table, index)
+    {
+        let cookies = this._dataSourceForTable(table);
+        console.assert(index >= 0 && index < cookies.length);
+        return cookies[index];
+    }
+
     // Table delegate
+
+    tableShouldSelectRow(table, cell, column, rowIndex)
+    {
+        return false;
+    }
 
     tablePopulateCell(table, cell, column, rowIndex)
     {
@@ -89,6 +109,9 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         case "httpOnly":
             cell.textContent = cookie.httpOnly ? checkmark : zeroWidthSpace;
             break;
+        case "sameSite":
+            cell.textContent = cookie.sameSite === WI.Cookie.SameSiteType.None ? emDash : WI.Cookie.displayNameForSameSiteType(cookie.sameSite);
+            break;
         }
 
         return cell;
@@ -111,23 +134,6 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
 
     // Private
 
-    _markIncompleteSectionWithMessage(section, message)
-    {
-        section.toggleIncomplete(true);
-
-        let p = section.detailsElement.appendChild(document.createElement("p"));
-        p.textContent = message;
-    }
-
-    _markIncompleteSectionWithLoadingIndicator(section)
-    {
-        section.toggleIncomplete(true);
-
-        let p = section.detailsElement.appendChild(document.createElement("p"));
-        let spinner = new WI.IndeterminateProgressSpinner;
-        p.appendChild(spinner.element);
-    }
-
     _dataSourceForTable(table)
     {
         return table === this._requestCookiesTable ? this._requestCookiesDataSource : this._responseCookiesDataSource;
@@ -146,6 +152,7 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         case "value":
         case "domain":
         case "path":
+        case "sameSite":
             // String.
             comparator = (a, b) => (a[sortColumnIdentifier] || "").extendedLocaleCompare(b[sortColumnIdentifier] || "");
             break;
@@ -197,7 +204,7 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         detailsElement.removeChildren();
 
         if (this._resource.responseSource === WI.Resource.ResponseSource.MemoryCache) {
-            this._markIncompleteSectionWithMessage(this._requestCookiesSection, WI.UIString("No request, served from the memory cache."));
+            this._requestCookiesSection.markIncompleteSectionWithMessage(WI.UIString("No request, served from the memory cache."));
             return;
         }
 
@@ -216,7 +223,7 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         if (!this._requestCookiesDataSource.length) {
             if (this._requestCookiesTable.isAttached)
                 this.removeSubview(this._requestCookiesTable);
-            this._markIncompleteSectionWithMessage(this._requestCookiesSection, WI.UIString("No request cookies."));
+            this._requestCookiesSection.markIncompleteSectionWithMessage(WI.UIString("No request cookies."));
         } else {
             this._requestCookiesSection.toggleIncomplete(false);
             this._requestCookiesTable.element.style.height = this._sizeForTable(this._requestCookiesTable) + "px";
@@ -232,7 +239,7 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         detailsElement.removeChildren();
 
         if (!this._resource.hasResponse()) {
-            this._markIncompleteSectionWithLoadingIndicator(this._responseCookiesSection);
+            this._responseCookiesSection.markIncompleteSectionWithLoadingIndicator();
             return;
         }
 
@@ -248,6 +255,7 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
             this._responseCookiesTable.addColumn(new WI.TableColumn("maxAge", WI.unlocalizedString("Max-Age"), {maxWidth: 90, align: "right"}));
             this._responseCookiesTable.addColumn(new WI.TableColumn("secure", WI.unlocalizedString("Secure"), {minWidth: 55, maxWidth: 65, align: "center"}));
             this._responseCookiesTable.addColumn(new WI.TableColumn("httpOnly", WI.unlocalizedString("HttpOnly"), {minWidth: 55, maxWidth: 65, align: "center"}));
+            this._responseCookiesTable.addColumn(new WI.TableColumn("sameSite", WI.unlocalizedString("SameSite"), {minWidth: 55, maxWidth: 65}));
             if (!this._responseCookiesTable.sortColumnIdentifier) {
                 this._responseCookiesTable.sortOrder = WI.Table.SortOrder.Ascending;
                 this._responseCookiesTable.sortColumnIdentifier = "name";
@@ -257,7 +265,7 @@ WI.ResourceCookiesContentView = class ResourceCookiesContentView extends WI.Cont
         if (!this._responseCookiesDataSource.length) {
             if (this._responseCookiesTable.isAttached)
                 this.removeSubview(this._responseCookiesTable);
-            this._markIncompleteSectionWithMessage(this._responseCookiesSection, WI.UIString("No response cookies."));
+            this._responseCookiesSection.markIncompleteSectionWithMessage(WI.UIString("No response cookies."));
         } else {
             this._responseCookiesSection.toggleIncomplete(false);
             this._responseCookiesTable.element.style.height = this._sizeForTable(this._responseCookiesTable) + "px";

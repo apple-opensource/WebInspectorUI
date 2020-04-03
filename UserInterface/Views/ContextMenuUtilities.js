@@ -47,15 +47,29 @@ WI.appendContextMenuItemsForSourceCode = function(contextMenu, sourceCodeOrLocat
     if (sourceCode instanceof WI.Resource) {
         if (sourceCode.urlComponents.scheme !== "data") {
             contextMenu.appendItem(WI.UIString("Copy as cURL"), () => {
-                sourceCode.generateCURLCommand();
+                InspectorFrontendHost.copyText(sourceCode.generateCURLCommand());
             });
+
+            contextMenu.appendSeparator();
+
+            contextMenu.appendItem(WI.UIString("Copy HTTP Request"), () => {
+                InspectorFrontendHost.copyText(sourceCode.stringifyHTTPRequest());
+            });
+
+            if (sourceCode.hasResponse()) {
+                contextMenu.appendItem(WI.UIString("Copy HTTP Response"), () => {
+                    InspectorFrontendHost.copyText(sourceCode.stringifyHTTPResponse());
+                });
+            }
+
+            contextMenu.appendSeparator();
         }
     }
 
     contextMenu.appendItem(WI.UIString("Save File"), () => {
         sourceCode.requestContent().then(() => {
             const forceSaveAs = true;
-            WI.saveDataToFile({
+            WI.FileUtilities.save({
                 url: sourceCode.url || "",
                 content: sourceCode.content
             }, forceSaveAs);
@@ -80,41 +94,52 @@ WI.appendContextMenuItemsForSourceCode = function(contextMenu, sourceCodeOrLocat
     }
 };
 
-WI.appendContextMenuItemsForURL = function(contextMenu, url, options)
+WI.appendContextMenuItemsForURL = function(contextMenu, url, options = {})
 {
     if (!url)
         return;
 
-    let {sourceCode, location, frame} = options;
     function showResourceWithOptions(options) {
-        if (location)
-            WI.showSourceCodeLocation(location, options);
-        else if (sourceCode)
-            WI.showSourceCode(sourceCode, options);
+        if (options.location)
+            WI.showSourceCodeLocation(options.location, options);
+        else if (options.sourceCode)
+            WI.showSourceCode(options.sourceCode, options);
         else
-            WI.openURL(url, frame, options);
+            WI.openURL(url, options.frame, options);
     }
 
-    contextMenu.appendItem(WI.UIString("Open in New Tab"), () => {
-        const frame = null;
-        WI.openURL(url, frame, {alwaysOpenExternally: true});
-    });
+    if (!url.startsWith("javascript:") && !url.startsWith("data:")) {
+        contextMenu.appendItem(WI.UIString("Open in New Tab"), () => {
+            const frame = null;
+            WI.openURL(url, frame, {alwaysOpenExternally: true});
+        });
+    }
 
-    if (WI.frameResourceManager.resourceForURL(url)) {
-        if (!WI.isShowingResourcesTab()) {
-            contextMenu.appendItem(WI.UIString("Reveal in Resources Tab"), () => {
-                showResourceWithOptions({ignoreNetworkTab: true, ignoreSearchTab: true});
-            });
+    if (WI.networkManager.resourceForURL(url)) {
+        if (WI.settings.experimentalEnableSourcesTab.value) {
+            if (!WI.isShowingSourcesTab()) {
+                contextMenu.appendItem(WI.UIString("Reveal in Sources Tab"), () => {
+                    showResourceWithOptions({preferredTabType: WI.SourcesTabContentView.Type});
+                });
+            }
+        } else {
+            if (!WI.isShowingResourcesTab()) {
+                contextMenu.appendItem(WI.UIString("Reveal in Resources Tab"), () => {
+                    showResourceWithOptions({preferredTabType: WI.ResourcesTabContentView.Type});
+                });
+            }
         }
         if (!WI.isShowingNetworkTab()) {
             contextMenu.appendItem(WI.UIString("Reveal in Network Tab"), () => {
-                showResourceWithOptions({ignoreResourcesTab: true, ignoreDebuggerTab: true, ignoreSearchTab: true});
+                showResourceWithOptions({preferredTabType: WI.NetworkTabContentView.Type});
             });
         }
     }
 
-    contextMenu.appendItem(WI.UIString("Copy Link Address"), () => {
-        InspectorFrontendHost.copyText(sourceCode.url);
+    contextMenu.appendSeparator();
+
+    contextMenu.appendItem(WI.UIString("Copy Link"), () => {
+        InspectorFrontendHost.copyText(url);
     });
 };
 
@@ -131,14 +156,16 @@ WI.appendContextMenuItemsForDOMNode = function(contextMenu, domNode, options = {
     let copySubMenu = options.copySubMenu || contextMenu.appendSubMenuItem(WI.UIString("Copy"));
 
     let isElement = domNode.nodeType() === Node.ELEMENT_NODE;
-    if (domNode.ownerDocument && isElement) {
+    let attached = domNode.attached;
+
+    if (isElement && attached) {
         copySubMenu.appendItem(WI.UIString("Selector Path"), () => {
             let cssPath = WI.cssPath(domNode);
             InspectorFrontendHost.copyText(cssPath);
         });
     }
 
-    if (domNode.ownerDocument && !domNode.isPseudoElement()) {
+    if (!domNode.isPseudoElement() && attached) {
         copySubMenu.appendItem(WI.UIString("XPath"), () => {
             let xpath = WI.xpath(domNode);
             InspectorFrontendHost.copyText(xpath);
@@ -165,16 +192,14 @@ WI.appendContextMenuItemsForDOMNode = function(contextMenu, domNode, options = {
                 });
             }
 
-            function didGetProperty(error, result, wasThrown) {
-                if (error || result.type !== "function")
-                    return;
-
-                DebuggerAgent.getFunctionDetails(result.objectId, didGetFunctionDetails);
-                result.release();
-            }
-
             WI.RemoteObject.resolveNode(domNode).then((remoteObject) => {
-                remoteObject.getProperty("constructor", didGetProperty);
+                remoteObject.getProperty("constructor", (error, result, wasThrown) => {
+                    if (error)
+                        return;
+                    if (result.type === "function")
+                        remoteObject.target.DebuggerAgent.getFunctionDetails(result.objectId, didGetFunctionDetails);
+                    result.release();
+                });
                 remoteObject.release();
             });
         });
@@ -182,34 +207,53 @@ WI.appendContextMenuItemsForDOMNode = function(contextMenu, domNode, options = {
         contextMenu.appendSeparator();
     }
 
-    if (WI.domDebuggerManager.supported && isElement && !domNode.isPseudoElement() && domNode.ownerDocument) {
+    if (WI.cssManager.canForcePseudoClasses() && domNode.attached) {
         contextMenu.appendSeparator();
 
-        const allowEditing = false;
-        WI.DOMBreakpointTreeController.appendBreakpointContextMenuItems(contextMenu, domNode, allowEditing);
+        let pseudoSubMenu = contextMenu.appendSubMenuItem(WI.UIString("Forced Pseudo-Classes", "A context menu item to force (override) a DOM node's pseudo-classes"));
+
+        let enabledPseudoClasses = domNode.enabledPseudoClasses;
+        WI.CSSManager.ForceablePseudoClasses.forEach((pseudoClass) => {
+            let enabled = enabledPseudoClasses.includes(pseudoClass);
+            pseudoSubMenu.appendCheckboxItem(pseudoClass.capitalize(), () => {
+                domNode.setPseudoClassEnabled(pseudoClass, !enabled);
+            }, enabled);
+        });
+    }
+
+    if (WI.domDebuggerManager.supported && isElement && !domNode.isPseudoElement() && attached) {
+        contextMenu.appendSeparator();
+
+        WI.appendContextMenuItemsForDOMNodeBreakpoints(contextMenu, domNode, options);
     }
 
     contextMenu.appendSeparator();
 
-    if (!options.excludeRevealElement && domNode.ownerDocument) {
-        contextMenu.appendItem(WI.UIString("Reveal in DOM Tree"), () => {
-            WI.domTreeManager.inspectElement(domNode.id);
-        });
-    }
-
     if (!options.excludeLogElement && !domNode.isInUserAgentShadowTree() && !domNode.isPseudoElement()) {
-        let label = isElement ? WI.UIString("Log Element") : WI.UIString("Log Node");
+        let label = isElement ? WI.UIString("Log Element", "Log (print) DOM element to Console") : WI.UIString("Log Node", "Log (print) DOM node to Console");
         contextMenu.appendItem(label, () => {
             WI.RemoteObject.resolveNode(domNode, WI.RuntimeManager.ConsoleObjectGroup).then((remoteObject) => {
-                let text = isElement ? WI.UIString("Selected Element") : WI.UIString("Selected Node");
+                let text = isElement ? WI.UIString("Selected Element", "Selected DOM element") : WI.UIString("Selected Node", "Selected DOM node");
                 const addSpecialUserLogClass = true;
                 WI.consoleLogViewController.appendImmediateExecutionWithResult(text, remoteObject, addSpecialUserLogClass);
             });
         });
     }
 
-    if (window.PageAgent) {
-        contextMenu.appendItem(WI.UIString("Capture Screenshot"), () => {
+    if (!options.excludeRevealElement && window.DOMAgent && attached) {
+        contextMenu.appendItem(WI.repeatedUIString.revealInDOMTree(), () => {
+            WI.domManager.inspectElement(domNode.id);
+        });
+    }
+
+    if (WI.settings.experimentalEnableLayersTab.value && window.LayerTreeAgent && attached) {
+        contextMenu.appendItem(WI.UIString("Reveal in Layers Tab", "Open Layers tab and select the layer corresponding to this node"), () => {
+            WI.showLayersTab({nodeToSelect: domNode});
+        });
+    }
+
+    if (window.PageAgent && attached) {
+        contextMenu.appendItem(WI.UIString("Capture Screenshot", "Capture screenshot of the selected DOM node"), () => {
             PageAgent.snapshotNode(domNode.id, (error, dataURL) => {
                 if (error) {
                     const target = WI.mainTarget;
@@ -222,18 +266,8 @@ WI.appendContextMenuItemsForDOMNode = function(contextMenu, domNode, options = {
                     return;
                 }
 
-                let date = new Date;
-                let values = [
-                    date.getFullYear(),
-                    Number.zeroPad(date.getMonth() + 1, 2),
-                    Number.zeroPad(date.getDate(), 2),
-                    Number.zeroPad(date.getHours(), 2),
-                    Number.zeroPad(date.getMinutes(), 2),
-                    Number.zeroPad(date.getSeconds(), 2),
-                ];
-                let filename = WI.UIString("Screen Shot %s-%s-%s at %s.%s.%s").format(...values);
-                WI.saveDataToFile({
-                    url: encodeURI(`web-inspector:///${filename}.png`),
+                WI.FileUtilities.save({
+                    url: WI.FileUtilities.inspectorURLForFilename(WI.FileUtilities.screenshotString() + ".png"),
                     content: parseDataURL(dataURL).data,
                     base64Encoded: true,
                 });
@@ -241,11 +275,73 @@ WI.appendContextMenuItemsForDOMNode = function(contextMenu, domNode, options = {
         });
     }
 
-    if (isElement) {
-        contextMenu.appendItem(WI.UIString("Scroll Into View"), () => {
+    if (isElement && attached) {
+        contextMenu.appendItem(WI.UIString("Scroll into View", "Scroll selected DOM node into view on the inspected web page"), () => {
             domNode.scrollIntoView();
         });
     }
 
     contextMenu.appendSeparator();
+};
+
+WI.appendContextMenuItemsForDOMNodeBreakpoints = function(contextMenu, domNode, options = {})
+{
+    if (contextMenu.__domBreakpointItemsAdded)
+        return;
+
+    contextMenu.__domBreakpointItemsAdded = true;
+
+    let breakpoints = WI.domDebuggerManager.domBreakpointsForNode(domNode);
+
+    contextMenu.appendSeparator();
+
+    let subMenu = contextMenu.appendSubMenuItem(WI.UIString("Break on"));
+
+    for (let type of Object.values(WI.DOMBreakpoint.Type)) {
+        let label = WI.DOMBreakpointTreeElement.displayNameForType(type);
+        let breakpoint = breakpoints.find((breakpoint) => breakpoint.type === type);
+
+        subMenu.appendCheckboxItem(label, function() {
+            if (breakpoint)
+                WI.domDebuggerManager.removeDOMBreakpoint(breakpoint);
+            else
+                WI.domDebuggerManager.addDOMBreakpoint(new WI.DOMBreakpoint(domNode, type));
+        }, !!breakpoint);
+    }
+
+    contextMenu.appendSeparator();
+
+    if (breakpoints.length) {
+        let shouldEnable = breakpoints.some((breakpoint) => breakpoint.disabled);
+        contextMenu.appendItem(shouldEnable ? WI.UIString("Enable Breakpoint") : WI.UIString("Disable Breakpoint"), () => {
+            for (let breakpoint of breakpoints)
+                breakpoint.disabled = !shouldEnable;
+        });
+
+        contextMenu.appendItem(WI.UIString("Delete Breakpoint"), () => {
+            for (let breakpoint of breakpoints)
+                WI.domDebuggerManager.removeDOMBreakpoint(breakpoint);
+        });
+
+        contextMenu.appendSeparator();
+    }
+
+    let subtreeBreakpoints = WI.domDebuggerManager.domBreakpointsInSubtree(domNode);
+    if (subtreeBreakpoints.length) {
+        if (options.revealDescendantBreakpointsMenuItemHandler)
+            contextMenu.appendItem(WI.UIString("Reveal Descendant Breakpoints"), options.revealDescendantBreakpointsMenuItemHandler);
+
+        let subtreeShouldEnable = subtreeBreakpoints.some((breakpoint) => breakpoint.disabled);
+        contextMenu.appendItem(subtreeShouldEnable ? WI.UIString("Enable Descendant Breakpoints") : WI.UIString("Disable Descendant Breakpoints"), () => {
+            for (let subtreeBreakpoint of subtreeBreakpoints)
+                subtreeBreakpoint.disabled = !subtreeShouldEnable;
+        });
+
+        contextMenu.appendItem(WI.UIString("Delete Descendant Breakpoints"), () => {
+            for (let subtreeBreakpoint of subtreeBreakpoints)
+                WI.domDebuggerManager.removeDOMBreakpoint(subtreeBreakpoint);
+        });
+
+        contextMenu.appendSeparator();
+    }
 };

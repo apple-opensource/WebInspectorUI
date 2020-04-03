@@ -45,39 +45,38 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         return nodeToInspect.nodeType() === Node.ELEMENT_NODE;
     }
 
-    visibilityDidChange()
+    hidden()
     {
-        super.visibilityDidChange();
+        super.hidden();
+
+        if (this._panel)
+            this._panel.hidden();
+    }
+
+    shown()
+    {
+        super.shown();
 
         if (!this._panel)
             return;
 
-        if (!this.visible) {
-            this._panel.hidden();
-            return;
-        }
+        console.assert(this.visible, `Shown panel ${this._identifier} must be visible.`);
 
         this._updateNoForcedPseudoClassesScrollOffset();
-
         this._panel.shown();
         this._panel.markAsNeedsRefresh(this.domNode);
     }
 
-    computedStyleDetailsPanelShowProperty(property)
+    // StyleDetailsPanel delegate
+
+    styleDetailsPanelFocusLastPseudoClassCheckbox(styleDetailsPanel)
     {
-        this.parentSidebar.selectedSidebarPanel = "style-rules";
+        this._forcedPseudoClassCheckboxes[WI.CSSManager.ForceablePseudoClasses.lastValue].focus();
+    }
 
-        let styleRulesPanel = null;
-        for (let sidebarPanel of this.parentSidebar.sidebarPanels) {
-            if (!(sidebarPanel instanceof WI.RulesStyleDetailsSidebarPanel))
-                continue;
-
-            styleRulesPanel = sidebarPanel;
-            break;
-        }
-
-        console.assert(styleRulesPanel, "Styles panel is missing.");
-        styleRulesPanel.panel.scrollToSectionAndHighlightProperty(property);
+    styleDetailsPanelFocusFilterBar(styleDetailsPanel)
+    {
+        this._filterBar.inputField.focus();
     }
 
     // Protected
@@ -92,9 +91,7 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         this._panel.markAsNeedsRefresh(domNode);
 
         this._updatePseudoClassCheckboxes();
-
-        if (!this._classListContainer.hidden)
-            this._populateClassToggles();
+        this._populateClassToggles();
     }
 
     addEventListeners()
@@ -119,19 +116,20 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
     initialLayout()
     {
-        if (WI.cssStyleManager.canForcePseudoClasses()) {
+        if (WI.cssManager.canForcePseudoClasses()) {
             this._forcedPseudoClassContainer = document.createElement("div");
             this._forcedPseudoClassContainer.className = "pseudo-classes";
 
             let groupElement = null;
 
-            WI.CSSStyleManager.ForceablePseudoClasses.forEach(function(pseudoClass) {
+            WI.CSSManager.ForceablePseudoClasses.forEach(function(pseudoClass) {
                 // We don't localize the label since it is a CSS pseudo-class from the CSS standard.
                 let label = pseudoClass.capitalize();
 
                 let labelElement = document.createElement("label");
 
                 let checkboxElement = document.createElement("input");
+                checkboxElement.addEventListener("keydown", this._handleForcedPseudoClassCheckboxKeydown.bind(this, pseudoClass));
                 checkboxElement.addEventListener("change", this._forcedPseudoClassCheckboxChanged.bind(this, pseudoClass));
                 checkboxElement.type = "checkbox";
 
@@ -152,8 +150,6 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
             this.contentView.element.appendChild(this._forcedPseudoClassContainer);
         }
 
-        this._panel.addEventListener(WI.StyleDetailsPanel.Event.Refreshed, this._filterDidChange, this);
-
         this._showPanel(this._panel);
 
         let optionsContainer = this.element.createChild("div", "options-container");
@@ -165,6 +161,7 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
         this._filterBar = new WI.FilterBar;
         this._filterBar.addEventListener(WI.FilterBar.Event.FilterDidChange, this._filterDidChange, this);
+        this._filterBar.inputField.addEventListener("keydown", this._handleFilterBarInputFieldKeyDown.bind(this));
         optionsContainer.appendChild(this._filterBar.element);
 
         this._classToggleButton = optionsContainer.createChild("button", "toggle-class-toggle");
@@ -180,12 +177,13 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         this._addClassContainer.addEventListener("click", this._addClassContainerClicked.bind(this));
 
         this._addClassInput = this._addClassContainer.createChild("input", "class-name-input");
+        this._addClassInput.spellcheck = false;
         this._addClassInput.setAttribute("placeholder", WI.UIString("Add New Class"));
         this._addClassInput.addEventListener("keypress", this._addClassInputKeyPressed.bind(this));
         this._addClassInput.addEventListener("blur", this._addClassInputBlur.bind(this));
 
-        WI.cssStyleManager.addEventListener(WI.CSSStyleManager.Event.StyleSheetAdded, this._styleSheetAddedOrRemoved, this);
-        WI.cssStyleManager.addEventListener(WI.CSSStyleManager.Event.StyleSheetRemoved, this._styleSheetAddedOrRemoved, this);
+        WI.cssManager.addEventListener(WI.CSSManager.Event.StyleSheetAdded, this._styleSheetAddedOrRemoved, this);
+        WI.cssManager.addEventListener(WI.CSSManager.Event.StyleSheetRemoved, this._styleSheetAddedOrRemoved, this);
 
         if (this._classListContainerToggledSetting.value)
             this._classToggleButtonClicked();
@@ -205,7 +203,7 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
     get _initialScrollOffset()
     {
-        if (!WI.cssStyleManager.canForcePseudoClasses())
+        if (!WI.cssManager.canForcePseudoClasses())
             return 0;
         return this.domNode && this.domNode.enabledPseudoClasses.length ? 0 : WI.GeneralStyleDetailsSidebarPanel.NoForcedPseudoClassesScrollOffset;
     }
@@ -229,14 +227,44 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         this._panel.shown();
     }
 
+    _handleForcedPseudoClassCheckboxKeydown(pseudoClass, event)
+    {
+        if (event.key !== "Tab")
+            return;
+
+        let pseudoClasses = WI.CSSManager.ForceablePseudoClasses;
+        let index = pseudoClasses.indexOf(pseudoClass);
+        if (event.shiftKey) {
+            if (index > 0) {
+                this._forcedPseudoClassCheckboxes[pseudoClasses[index - 1]].focus();
+                event.preventDefault();
+            } else {
+                this._filterBar.inputField.focus();
+                event.preventDefault();
+            }
+        } else {
+            if (index < pseudoClasses.length - 1) {
+                this._forcedPseudoClassCheckboxes[pseudoClasses[index + 1]].focus();
+                event.preventDefault();
+            } else if (this._panel.focusFirstSection) {
+                this._panel.focusFirstSection();
+                event.preventDefault();
+            }
+        }
+    }
+
     _forcedPseudoClassCheckboxChanged(pseudoClass, event)
     {
         if (!this.domNode)
             return;
 
         let effectiveDOMNode = this.domNode.isPseudoElement() ? this.domNode.parentNode : this.domNode;
+        if (!effectiveDOMNode)
+            return;
 
         effectiveDOMNode.setPseudoClassEnabled(pseudoClass, event.target.checked);
+
+        this._forcedPseudoClassCheckboxes[pseudoClass].focus();
     }
 
     _updatePseudoClassCheckboxes()
@@ -245,6 +273,8 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
             return;
 
         let effectiveDOMNode = this.domNode.isPseudoElement() ? this.domNode.parentNode : this.domNode;
+        if (!effectiveDOMNode)
+            return;
 
         let enabledPseudoClasses = effectiveDOMNode.enabledPseudoClasses;
 
@@ -283,9 +313,6 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         this._classToggleButton.classList.toggle("selected");
         this._classListContainer.hidden = !this._classListContainer.hidden;
         this._classListContainerToggledSetting.value = !this._classListContainer.hidden;
-        if (this._classListContainer.hidden)
-            return;
-
         this._populateClassToggles();
     }
 
@@ -312,11 +339,14 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
     _populateClassToggles()
     {
+        if (!this._classListContainer || this._classListContainer.hidden)
+            return;
+
         // Ensure that _addClassContainer is the first child of _classListContainer.
         while (this._classListContainer.children.length > 1)
             this._classListContainer.children[1].remove();
 
-        let classes = this.domNode.getAttribute("class");
+        let classes = this.domNode.getAttribute("class") || [];
         let classToggledMap = this.domNode[WI.GeneralStyleDetailsSidebarPanel.ToggledClassesSymbol];
         if (!classToggledMap)
             classToggledMap = this.domNode[WI.GeneralStyleDetailsSidebarPanel.ToggledClassesSymbol] = new Map;
@@ -386,6 +416,22 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         this._panel.filterDidChange(this._filterBar);
     }
 
+    _handleFilterBarInputFieldKeyDown(event)
+    {
+        if (event.key !== "Tab")
+            return;
+
+        if (event.shiftKey) {
+            if (this._panel.focusLastSection) {
+                this._panel.focusLastSection();
+                event.preventDefault();
+            }
+        } else {
+            this._forcedPseudoClassCheckboxes[WI.CSSManager.ForceablePseudoClasses[0]].focus();
+            event.preventDefault();
+        }
+    }
+
     _styleSheetAddedOrRemoved()
     {
         this.needsLayout();
@@ -400,4 +446,4 @@ WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInSectionClassName = "filter-sec
 WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInPropertyClassName = "filter-property-non-matching";
 
 WI.GeneralStyleDetailsSidebarPanel.ToggledClassesSymbol = Symbol("css-style-details-sidebar-panel-toggled-classes-symbol");
-WI.GeneralStyleDetailsSidebarPanel.ToggledClassesDragType = "text/classname";
+WI.GeneralStyleDetailsSidebarPanel.ToggledClassesDragType = "web-inspector/css-class";

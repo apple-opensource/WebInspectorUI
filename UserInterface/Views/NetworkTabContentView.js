@@ -27,8 +27,7 @@ WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
 {
     constructor(identifier)
     {
-        let {image, title} = WI.NetworkTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
+        let tabBarItem = WI.GeneralTabBarItem.fromTabInfo(WI.NetworkTabContentView.tabInfo());
 
         super(identifier || "network", "network", tabBarItem);
 
@@ -82,6 +81,11 @@ WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
         this._contentBrowser.contentViewContainer.closeAllContentViews();
 
         super.closed();
+    }
+
+    async handleFileDrop(files)
+    {
+        await WI.FileUtilities.readJSON(files, (result) => this._networkTableContentView.processHAR(result));
     }
 
     // Public

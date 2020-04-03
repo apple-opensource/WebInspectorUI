@@ -27,8 +27,7 @@ WI.ResourcesTabContentView = class ResourcesTabContentView extends WI.ContentBro
 {
     constructor(identifier)
     {
-        let {image, title} = WI.ResourcesTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
+        let tabBarItem = WI.GeneralTabBarItem.fromTabInfo(WI.ResourcesTabContentView.tabInfo());
         const detailsSidebarPanelConstructors = [WI.ResourceDetailsSidebarPanel, WI.ProbeDetailsSidebarPanel];
         super(identifier || "resources", "resources", tabBarItem, WI.ResourceSidebarPanel, detailsSidebarPanelConstructors);
     }
@@ -39,6 +38,11 @@ WI.ResourcesTabContentView = class ResourcesTabContentView extends WI.ContentBro
             image: "Images/Resources.svg",
             title: WI.UIString("Resources"),
         };
+    }
+
+    static isTabAllowed()
+    {
+        return !WI.settings.experimentalEnableSourcesTab.value;
     }
 
     // Public
@@ -56,10 +60,13 @@ WI.ResourcesTabContentView = class ResourcesTabContentView extends WI.ContentBro
     canShowRepresentedObject(representedObject)
     {
         return representedObject instanceof WI.Frame
+            || representedObject instanceof WI.FrameCollection
             || representedObject instanceof WI.Resource
+            || representedObject instanceof WI.ResourceCollection
             || representedObject instanceof WI.Script
+            || representedObject instanceof WI.ScriptCollection
             || representedObject instanceof WI.CSSStyleSheet
-            || (representedObject instanceof WI.Collection && !(representedObject instanceof WI.CanvasCollection));
+            || representedObject instanceof WI.CSSStyleSheetCollection;
     }
 };
 

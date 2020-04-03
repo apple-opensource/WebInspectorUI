@@ -27,7 +27,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
 {
     constructor(url, sourceMap)
     {
-        super(url, null);
+        super(url);
 
         console.assert(url);
         console.assert(sourceMap);
@@ -51,10 +51,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
 
     // Public
 
-    get sourceMap()
-    {
-        return this._sourceMap;
-    }
+    get sourceMap() { return this._sourceMap; }
 
     get sourceMapDisplaySubpath()
     {
@@ -77,7 +74,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
         return resourceURLComponents.path.substring(sourceMappingBasePathURLComponents.path.length, resourceURLComponents.length);
     }
 
-    requestContentFromBackend(callback)
+    requestContentFromBackend()
     {
         // Revert the markAsFinished that was done in the constructor.
         this.revertMarkAsFinished();
@@ -131,9 +128,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
             });
         }
 
-        // COMPATIBILITY (iOS 7): Network.loadResource did not exist.
-        // Also, JavaScript Debuggable with SourceMaps that do not have inlined content may reach this.
-        if (!window.NetworkAgent || !NetworkAgent.loadResource)
+        if (!window.NetworkAgent)
             return sourceMapResourceLoadError.call(this);
 
         var frameIdentifier = null;
@@ -141,7 +136,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
             frameIdentifier = this._sourceMap.originalSourceCode.parentFrame.id;
 
         if (!frameIdentifier)
-            frameIdentifier = WI.frameResourceManager.mainFrame ? WI.frameResourceManager.mainFrame.id : "";
+            frameIdentifier = WI.networkManager.mainFrame ? WI.networkManager.mainFrame.id : "";
 
         return NetworkAgent.loadResource(frameIdentifier, this.url).then(sourceMapResourceLoaded.bind(this)).catch(sourceMapResourceLoadError.bind(this));
     }

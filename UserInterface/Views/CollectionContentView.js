@@ -109,7 +109,7 @@ WI.CollectionContentView = class CollectionContentView extends WI.ContentView
             return;
         }
 
-        this._hideContentPlaceholder();
+        this.hideContentPlaceholder();
 
         let contentView = new this._contentViewConstructor(item);
         console.assert(contentView instanceof WI.ContentView);
@@ -171,7 +171,7 @@ WI.CollectionContentView = class CollectionContentView extends WI.ContentView
         }
 
         if (!this.subviews.length)
-            this._showContentPlaceholder();
+            this.showContentPlaceholder();
     }
 
     contentViewAdded(contentView)
@@ -184,11 +184,29 @@ WI.CollectionContentView = class CollectionContentView extends WI.ContentView
         // Implemented by subclasses.
     }
 
+    showContentPlaceholder()
+    {
+        if (!this._contentPlaceholderElement) {
+            if (typeof this._contentPlaceholder === "string")
+                this._contentPlaceholderElement = WI.createMessageTextView(this._contentPlaceholder);
+            else if (this._contentPlaceholder instanceof HTMLElement)
+                this._contentPlaceholderElement = this._contentPlaceholder;
+        }
+
+        if (!this._contentPlaceholderElement.parentNode)
+            this.element.appendChild(this._contentPlaceholderElement);
+    }
+
+    hideContentPlaceholder()
+    {
+        if (this._contentPlaceholderElement)
+            this._contentPlaceholderElement.remove();
+    }
+
     initialLayout()
     {
-        let items = this.representedObject.items;
-        if (!items.size || !this._contentViewConstructor) {
-            this._showContentPlaceholder();
+        if (!this.representedObject.size || !this._contentViewConstructor) {
+            this.showContentPlaceholder();
             return;
         }
     }
@@ -201,7 +219,7 @@ WI.CollectionContentView = class CollectionContentView extends WI.ContentView
         this.representedObject.addEventListener(WI.Collection.Event.ItemRemoved, this._handleItemRemoved, this);
 
         for (let item of this._contentViewMap.keys()) {
-            if (this.representedObject.items.has(item))
+            if (this.representedObject.has(item))
                 continue;
 
             this.removeContentViewForItem(item);
@@ -209,7 +227,7 @@ WI.CollectionContentView = class CollectionContentView extends WI.ContentView
                 this._selectItem(null);
         }
 
-        for (let item of this.representedObject.items) {
+        for (let item of this.representedObject) {
             if (!this._contentViewMap.has(item))
                 this.addContentViewForItem(item);
         }
@@ -268,24 +286,5 @@ WI.CollectionContentView = class CollectionContentView extends WI.ContentView
         }
 
         this.dispatchEventToListeners(WI.ContentView.Event.SupplementalRepresentedObjectsDidChange);
-    }
-
-    _showContentPlaceholder()
-    {
-        if (!this._contentPlaceholderElement) {
-            if (typeof this._contentPlaceholder === "string")
-                this._contentPlaceholderElement = WI.createMessageTextView(this._contentPlaceholder);
-            else if (this._contentPlaceholder instanceof HTMLElement)
-                this._contentPlaceholderElement =  this._contentPlaceholder;
-        }
-
-        if (!this._contentPlaceholderElement.parentNode)
-            this.element.appendChild(this._contentPlaceholderElement);
-    }
-
-    _hideContentPlaceholder()
-    {
-        if (this._contentPlaceholderElement)
-            this._contentPlaceholderElement.remove();
     }
 };

@@ -32,8 +32,6 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
         const label = WI.UIString("Styles \u2014 Rules");
         super(delegate, className, identifier, label);
 
-        this.element.classList.add("spreadsheet-style-panel");
-
         // Make the styles sidebar always left-to-right since CSS is strictly an LTR language.
         this.element.dir = "ltr";
 
@@ -43,6 +41,7 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
         this._ruleMediaAndInherticanceList = [];
         this._propertyToSelectAndHighlight = null;
         this._filterText = null;
+        this._shouldRefreshSubviews = false;
 
         this._emptyFilterResultsElement = WI.createMessageTextView(WI.UIString("No Results Found"));
     }
@@ -53,98 +52,20 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
     {
         // We only need to do a rebuild on significant changes. Other changes are handled
         // by the sections and text editors themselves.
-        if (!significantChange) {
-            super.refresh(significantChange);
-            return;
+        if (significantChange) {
+            this._shouldRefreshSubviews = true;
+            this.needsLayout();
         }
-
-        this.removeAllSubviews();
-
-        let previousStyle = null;
-        this._headerMap.clear();
-        this._sections = [];
-
-        let uniqueOrderedStyles = (orderedStyles) => {
-            let uniqueStyles = [];
-
-            for (let style of orderedStyles) {
-                let rule = style.ownerRule;
-                if (!rule) {
-                    uniqueStyles.push(style);
-                    continue;
-                }
-
-                let found = false;
-                for (let existingStyle of uniqueStyles) {
-                    if (rule.isEqualTo(existingStyle.ownerRule)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
-                    uniqueStyles.push(style);
-            }
-
-            return uniqueStyles;
-        };
-
-        let createHeader = (text, node) => {
-            let header = this.element.appendChild(document.createElement("h2"));
-            header.classList.add("section-header");
-            header.append(text);
-            header.append(" ", WI.linkifyNodeReference(node, {
-                maxLength: 100,
-                excludeRevealElement: true,
-            }));
-
-            this._headerMap.set(node, header);
-        };
-
-        let createSection = (style) => {
-            let section = style[WI.SpreadsheetRulesStyleDetailsPanel.RuleSection];
-            if (!section) {
-                section = new WI.SpreadsheetCSSStyleDeclarationSection(this, style);
-                style[WI.SpreadsheetRulesStyleDetailsPanel.RuleSection] = section;
-            }
-
-            section.addEventListener(WI.SpreadsheetCSSStyleDeclarationSection.Event.FilterApplied, this._handleSectionFilterApplied, this);
-
-            if (this._newRuleSelector === style.selectorText && !style.hasProperties())
-                section.startEditingRuleSelector();
-
-            this.addSubview(section);
-            section.needsLayout();
-            this._sections.push(section);
-
-            previousStyle = style;
-        };
-
-        for (let style of uniqueOrderedStyles(this.nodeStyles.orderedStyles)) {
-            if (style.inherited && (!previousStyle || previousStyle.node !== style.node))
-                createHeader(WI.UIString("Inherited From"), style.node);
-
-            createSection(style);
-        }
-
-        let pseudoElements = Array.from(this.nodeStyles.node.pseudoElements().values());
-        Promise.all(pseudoElements.map((pseudoElement) => WI.cssStyleManager.stylesForNode(pseudoElement).refreshIfNeeded()))
-        .then((pseudoNodeStyles) => {
-            for (let pseudoNodeStyle of pseudoNodeStyles) {
-                createHeader(WI.UIString("Pseudo Element"), pseudoNodeStyle.node);
-
-                for (let style of uniqueOrderedStyles(pseudoNodeStyle.orderedStyles))
-                    createSection(style);
-            }
-        });
-
-        this._newRuleSelector = null;
-
-        this.element.append(this._emptyFilterResultsElement);
-
-        if (this._filterText)
-            this.applyFilter(this._filterText);
 
         super.refresh(significantChange);
+    }
+
+    hidden()
+    {
+        for (let section of this._sections)
+            section.hidden();
+
+        super.hidden();
     }
 
     scrollToSectionAndHighlightProperty(property)
@@ -183,7 +104,7 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
         if (this.nodeStyles.node.isInUserAgentShadowTree())
             return;
 
-        let styleSheets = WI.cssStyleManager.styleSheets.filter(styleSheet => styleSheet.hasInfo() && !styleSheet.isInlineStyleTag() && !styleSheet.isInlineStyleAttributeStyleSheet());
+        let styleSheets = WI.cssManager.styleSheets.filter(styleSheet => styleSheet.hasInfo() && !styleSheet.isInlineStyleTag() && !styleSheet.isInlineStyleAttributeStyleSheet());
         if (!styleSheets.length)
             return;
 
@@ -207,31 +128,6 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
         }
     }
 
-    cssStyleDeclarationSectionStartEditingNextRule(currentSection)
-    {
-        let currentIndex = this._sections.indexOf(currentSection);
-        let index = currentIndex < this._sections.length - 1 ? currentIndex + 1 : 0;
-        this._sections[index].startEditingRuleSelector();
-    }
-
-    cssStyleDeclarationSectionStartEditingPreviousRule(currentSection)
-    {
-        let index = this._sections.indexOf(currentSection);
-        console.assert(index > -1);
-
-        while (true) {
-            index--;
-            if (index < 0)
-                break;
-
-            let section = this._sections[index];
-            if (section.editable) {
-                section._propertiesEditor.startEditingLastProperty();
-                break;
-            }
-        }
-    }
-
     applyFilter(filterText)
     {
         this._filterText = filterText;
@@ -249,7 +145,188 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
             section.applyFilter(this._filterText);
     }
 
+    focusFirstSection()
+    {
+        this.spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule(null, 1);
+    }
+
+    focusLastSection()
+    {
+        this.spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule(null, -1);
+    }
+
+    // SpreadsheetCSSStyleDeclarationSection delegate
+
+    spreadsheetCSSStyleDeclarationSectionSelectProperty(property)
+    {
+        this.scrollToSectionAndHighlightProperty(property);
+    }
+
+    spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule(currentSection, delta)
+    {
+        console.assert(delta !== 0);
+
+        let index = this._sections.indexOf(currentSection);
+        if (index < 0) {
+            if (delta < 0)
+                index = this._sections.length;
+            else if (delta > 0)
+                index = -1;
+        }
+        index += delta;
+
+        while (this._sections[index] !== currentSection) {
+            if (index < 0) {
+                if (this._delegate && this._delegate.styleDetailsPanelFocusLastPseudoClassCheckbox) {
+                    this._delegate.styleDetailsPanelFocusLastPseudoClassCheckbox(this);
+                    break;
+                }
+
+                index = this._sections.length - 1;
+            } else if (index >= this._sections.length) {
+                if (this._delegate && this._delegate.styleDetailsPanelFocusFilterBar) {
+                    this._delegate.styleDetailsPanelFocusFilterBar(this);
+                    break;
+                }
+
+                index = 0;
+            }
+
+            let section = this._sections[index];
+            if (section.editable) {
+                if (delta < 0)
+                    section._propertiesEditor.startEditingLastProperty();
+                else
+                    section.startEditingRuleSelector();
+                break;
+            }
+
+            index += delta;
+        }
+    }
+
     // Protected
+
+    layout()
+    {
+        if (!this._shouldRefreshSubviews)
+            return;
+
+        this._shouldRefreshSubviews = false;
+
+        let oldSections = this._sections.slice();
+        let preservedSections = oldSections.filter((section) => {
+            if (section[SpreadsheetRulesStyleDetailsPanel.SectionShowingForNodeSymbol] !== this.nodeStyles.node) {
+                section[SpreadsheetRulesStyleDetailsPanel.SectionShowingForNodeSymbol] = null;
+                section[SpreadsheetRulesStyleDetailsPanel.SectionIndexSymbol] = -1;
+            }
+            return section[SpreadsheetRulesStyleDetailsPanel.SectionShowingForNodeSymbol];
+        });
+
+        if (preservedSections.length) {
+            for (let section of oldSections) {
+                if (!preservedSections.includes(section))
+                    this.removeSubview(section);
+            }
+            for (let header of this._headerMap.values())
+                header.remove();
+        } else
+            this.removeAllSubviews();
+
+        let previousStyle = null;
+        let currentHeader = null;
+        this._headerMap.clear();
+        this._sections = [];
+
+        let addHeader = (text, nodeOrPseudoId) => {
+            currentHeader = this.element.appendChild(document.createElement("h2"));
+            currentHeader.classList.add("section-header");
+            currentHeader.append(text);
+
+            if (nodeOrPseudoId) {
+                if (nodeOrPseudoId instanceof WI.DOMNode) {
+                    currentHeader.append(" ", WI.linkifyNodeReference(nodeOrPseudoId, {
+                        maxLength: 100,
+                        excludeRevealElement: true,
+                    }));
+                } else
+                    currentHeader.append(" ", WI.CSSManager.displayNameForPseudoId(nodeOrPseudoId));
+            }
+        };
+
+        let addSection = (section) => {
+            if (section.style.inherited && (!previousStyle || previousStyle.node !== section.style.node))
+                addHeader(WI.UIString("Inherited From", "A section of CSS rules matching an ancestor DOM node"), section.style.node);
+
+            if (!section.isDescendantOf(this)) {
+                let referenceView = this.subviews[this._sections.length];
+                if (!referenceView || referenceView[SpreadsheetRulesStyleDetailsPanel.SectionIndexSymbol] === this._sections.length)
+                    this.addSubview(section);
+                else
+                    this.insertSubviewBefore(section, referenceView);
+            }
+
+            this._sections.push(section);
+            section.needsLayout();
+
+            if (currentHeader)
+                this._headerMap.set(section.style, currentHeader);
+
+            previousStyle = section.style;
+        };
+
+        let createSection = (style) => {
+            let section = style[SpreadsheetRulesStyleDetailsPanel.StyleSectionSymbol];
+            if (!section) {
+                section = new WI.SpreadsheetCSSStyleDeclarationSection(this, style);
+                section.addEventListener(WI.SpreadsheetCSSStyleDeclarationSection.Event.FilterApplied, this._handleSectionFilterApplied, this);
+                section.addEventListener(WI.SpreadsheetCSSStyleDeclarationSection.Event.SelectorWillChange, this._handleSectionSelectorWillChange, this);
+                style[SpreadsheetRulesStyleDetailsPanel.StyleSectionSymbol] = section;
+            }
+
+            if (this._newRuleSelector === style.selectorText && style.enabledProperties.length === 0)
+                section.startEditingRuleSelector();
+
+            addSection(section);
+
+            let preservedSection = preservedSections.find((sectionToPreserve) => sectionToPreserve[SpreadsheetRulesStyleDetailsPanel.SectionIndexSymbol] === this._sections.length - 1);
+            if (preservedSection)
+                addSection(preservedSection);
+        };
+
+        for (let style of this.nodeStyles.uniqueOrderedStyles)
+            createSection(style);
+
+        let beforePseudoId = null;
+        let afterPseudoId = null;
+        if (InspectorBackend.domains.CSS.PseudoId) {
+            beforePseudoId = InspectorBackend.domains.CSS.PseudoId.Before;
+            afterPseudoId = InspectorBackend.domains.CSS.PseudoId.After;
+        } else {
+            // Compatibility (iOS 12.2): CSS.PseudoId did not exist.
+            beforePseudoId = 4;
+            afterPseudoId = 5;
+        }
+
+        for (let [pseudoId, pseudoElementInfo] of this.nodeStyles.pseudoElements) {
+            let pseudoElement = null;
+            if (pseudoId === beforePseudoId)
+                pseudoElement = this.nodeStyles.node.beforePseudoElement();
+            else if (pseudoId === afterPseudoId)
+                pseudoElement = this.nodeStyles.node.afterPseudoElement();
+            addHeader(WI.UIString("Pseudo-Element"), pseudoElement || pseudoId);
+
+            for (let style of WI.DOMNodeStyles.uniqueOrderedStyles(pseudoElementInfo.orderedStyles))
+                createSection(style);
+        }
+
+        this._newRuleSelector = null;
+
+        this.element.append(this._emptyFilterResultsElement);
+
+        if (this._filterText)
+            this.applyFilter(this._filterText);
+    }
 
     filterDidChange(filterBar)
     {
@@ -267,12 +344,10 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
 
         this.element.classList.remove("filter-non-matching");
 
-        let header = this._headerMap.get(event.target.style.node);
+        let header = this._headerMap.get(event.target.style);
         if (header)
             header.classList.remove(WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInSectionClassName);
     }
-
-    // Private
 
     _addNewRule(stylesheetId)
     {
@@ -282,6 +357,16 @@ WI.SpreadsheetRulesStyleDetailsPanel = class SpreadsheetRulesStyleDetailsPanel e
         const text = "";
         this.nodeStyles.addRule(this._newRuleSelector, text, stylesheetId);
     }
+
+    _handleSectionSelectorWillChange(event)
+    {
+        let section = event.target;
+        section[SpreadsheetRulesStyleDetailsPanel.SectionShowingForNodeSymbol] = this.nodeStyles.node;
+        section[SpreadsheetRulesStyleDetailsPanel.SectionIndexSymbol] = this._sections.indexOf(section);
+        console.assert(section[SpreadsheetRulesStyleDetailsPanel.SectionIndexSymbol] >= 0);
+    }
 };
 
-WI.SpreadsheetRulesStyleDetailsPanel.RuleSection = Symbol("rule-section");
+WI.SpreadsheetRulesStyleDetailsPanel.StyleSectionSymbol = Symbol("style-section");
+WI.SpreadsheetRulesStyleDetailsPanel.SectionShowingForNodeSymbol = Symbol("style-showing-for-node");
+WI.SpreadsheetRulesStyleDetailsPanel.SectionIndexSymbol = Symbol("style-index");
