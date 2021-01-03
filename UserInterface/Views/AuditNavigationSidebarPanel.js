@@ -64,8 +64,8 @@ WI.AuditNavigationSidebarPanel = class AuditNavigationSidebarPanel extends WI.Na
         versionContainer.classList.add("audit-version");
 
         let version = WI.AuditTestBase.Version;
-        if (InspectorBackend.domains.Audit)
-            version = Math.min(version, InspectorBackend.domains.Audit.VERSION);
+        if (InspectorBackend.hasDomain("Audit"))
+            version = Math.min(version, InspectorBackend.getVersion("Audit"));
         versionContainer.textContent = WI.UIString("Audit version: %s").format(version);
 
         this.contentBrowser.showContentView(contentView);
@@ -237,8 +237,15 @@ WI.AuditNavigationSidebarPanel = class AuditNavigationSidebarPanel extends WI.Na
             if (this._selectedTreeElementBeforeEditing)
                 this._selectedTreeElementBeforeEditing.deselect();
         } else if (this._selectedTreeElementBeforeEditing) {
-            if (!(this._selectedTreeElementBeforeEditing.representedObject instanceof WI.AuditTestBase) || !this._selectedTreeElementBeforeEditing.representedObject.disabled)
-                this._selectedTreeElementBeforeEditing.select();
+            if (this.contentTreeOutline.selectedTreeElement === this._selectedTreeElementBeforeEditing) {
+                const suppressNotification = true;
+                this._selectedTreeElementBeforeEditing.deselect(suppressNotification);
+            }
+            if (!(this._selectedTreeElementBeforeEditing.representedObject instanceof WI.AuditTestBase) || !this._selectedTreeElementBeforeEditing.representedObject.disabled) {
+                const omitFocus = false;
+                const selectedByUser = true;
+                this._selectedTreeElementBeforeEditing.select(omitFocus, selectedByUser);
+            }
             this._selectedTreeElementBeforeEditing = null;
         }
 
@@ -315,7 +322,7 @@ WI.AuditNavigationSidebarPanel = class AuditNavigationSidebarPanel extends WI.Na
 
     _handleImportButtonNavigationItemClicked(event)
     {
-        WI.FileUtilities.importJSON((result) => WI.auditManager.processJSON(result));
+        WI.FileUtilities.importJSON((result) => WI.auditManager.processJSON(result), {multiple: true});
     }
 
     _handleEditButtonNavigationItemClicked(event)

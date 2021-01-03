@@ -27,7 +27,7 @@
     if (WI.dontLocalizeUserInterface)
         return;
 
-    let localizedStringsURL = InspectorFrontendHost.localizedStringsURL();
+    let localizedStringsURL = InspectorFrontendHost.localizedStringsURL;
     console.assert(localizedStringsURL);
     if (localizedStringsURL)
         document.write("<script src=\"" + localizedStringsURL + "\"></script>");
@@ -109,4 +109,8 @@ WI.repeatedUIString.fetch = function() {
 
 WI.repeatedUIString.revealInDOMTree = function() {
     return WI.UIString("Reveal in DOM Tree", "Open Elements tab and select this node in DOM tree");
+};
+
+WI.repeatedUIString.showTransparencyGridTooltip = function() {
+    return WI.UIString("Show transparency grid", "Show transparency grid (tooltip)", "Tooltip for showing the checkered transparency grid under images and canvases")
 };

@@ -25,10 +25,9 @@
 
 WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrowserTabContentView
 {
-    constructor(identifier)
+    constructor()
     {
-        let tabBarItem = WI.GeneralTabBarItem.fromTabInfo(WI.TimelineTabContentView.tabInfo());
-        super(identifier || "timeline", "timeline", tabBarItem);
+        super(TimelineTabContentView.tabInfo());
 
         // Maintain an invisible tree outline containing tree elements for all recordings.
         // The visible recording's tree element is selected when the content view changes.
@@ -58,7 +57,7 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
         this.contentBrowser.navigationBar.insertNavigationItem(this._recordButton, 0);
         this.contentBrowser.navigationBar.insertNavigationItem(this._continueButton, 1);
 
-        if (WI.FPSInstrument.supported()) {
+        if (WI.sharedApp.isWebDebuggable()) {
             let timelinesNavigationItem = new WI.RadioButtonNavigationItem(WI.TimelineOverview.ViewMode.Timelines, WI.UIString("Events"));
             let renderingFramesNavigationItem = new WI.RadioButtonNavigationItem(WI.TimelineOverview.ViewMode.RenderingFrames, WI.UIString("Frames"));
 
@@ -84,13 +83,9 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
         const selectedByUser = false;
         this._changeViewMode(WI.TimelineOverview.ViewMode.Timelines, selectedByUser);
 
-        for (let recording of WI.timelineManager.recordings)
-            this._addRecording(recording);
-
-        this._recordingCountChanged();
-
-        // Explicitly update the path for the navigation bar to prevent it from showing up as blank.
-        this.contentBrowser.updateHierarchicalPathForCurrentContentView();
+        WI.heapManager.enable();
+        WI.memoryManager.enable();
+        WI.timelineManager.enable();
     }
 
     // Static
@@ -98,14 +93,16 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
     static tabInfo()
     {
         return {
+            identifier: TimelineTabContentView.Type,
             image: "Images/Timeline.svg",
-            title: WI.UIString("Timelines"),
+            displayName: WI.UIString("Timelines", "Timelines Tab Name", "Name of Timelines Tab"),
         };
     }
 
     static isTabAllowed()
     {
-        return !!window.TimelineAgent || !!window.ScriptProfilerAgent;
+        return InspectorBackend.hasDomain("Timeline")
+            || InspectorBackend.hasDomain("ScriptProfiler");
     }
 
     static displayNameForTimelineType(timelineType)
@@ -126,6 +123,9 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
         case WI.TimelineRecord.Type.HeapAllocations:
             return WI.UIString("JavaScript Allocations");
         case WI.TimelineRecord.Type.Media:
+            // COMPATIBILITY (iOS 13): Animation domain did not exist yet.
+            if (InspectorBackend.hasDomain("Animation"))
+                return WI.UIString("Media & Animations");
             return WI.UIString("Media");
         default:
             console.error("Unknown Timeline type:", timelineType);
@@ -232,7 +232,7 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
             case WI.ScriptTimelineRecord.EventType.AnimationFrameFired:
             case WI.ScriptTimelineRecord.EventType.AnimationFrameRequested:
             case WI.ScriptTimelineRecord.EventType.AnimationFrameCanceled:
-                return WI.TimelineRecordTreeElement.AnimationRecordIconStyleClass;
+                return "animation-frame-record";
             default:
                 console.error("Unknown ScriptTimelineRecord eventType: " + timelineRecord.eventType, timelineRecord);
             }
@@ -247,10 +247,12 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
 
         case WI.TimelineRecord.Type.Media:
             switch (timelineRecord.eventType) {
-            case WI.MediaTimelineRecord.EventType.DOMEvent:
-                return "dom-event-record";
-            case WI.MediaTimelineRecord.EventType.PowerEfficientPlaybackStateChanged:
-                return "power-efficient-playback-state-changed-record";
+            case WI.MediaTimelineRecord.EventType.CSSAnimation:
+                return "css-animation-record";
+            case WI.MediaTimelineRecord.EventType.CSSTransition:
+                return "css-transition-record";
+            case WI.MediaTimelineRecord.EventType.MediaElement:
+                return "media-element-record";
             default:
                 console.error("Unknown MediaTimelineRecord eventType: " + timelineRecord.eventType, timelineRecord);
             }
@@ -286,6 +288,10 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
                 return WI.UIString("Snapshot %d \u2014 %s").format(timelineRecord.heapSnapshot.identifier, timelineRecord.heapSnapshot.title);
             return WI.UIString("Snapshot %d").format(timelineRecord.heapSnapshot.identifier);
         case WI.TimelineRecord.Type.Media:
+            // Since the `displayName` can be specific to an `animation-name`/`transition-property`,
+            // use the generic `subtitle` text instead of we are rendering from the overview.
+            if (includeDetailsInMainTitle && timelineRecord.subtitle)
+                return timelineRecord.subtitle;
             return timelineRecord.displayName;
         case WI.TimelineRecord.Type.CPU:
         case WI.TimelineRecord.Type.Memory:
@@ -327,13 +333,16 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
 
     closed()
     {
-        super.closed();
+        WI.timelineManager.disable();
+        WI.memoryManager.disable();
+        WI.heapManager.disable();
 
-        if (WI.FPSInstrument.supported())
-            this.contentBrowser.navigationBar.removeEventListener(null, null, this);
+        this.contentBrowser.navigationBar.removeEventListener(null, null, this);
 
         WI.timelineManager.removeEventListener(null, null, this);
         WI.notifications.removeEventListener(null, null, this);
+
+        super.closed();
     }
 
     canShowRepresentedObject(representedObject)
@@ -341,12 +350,47 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
         return representedObject instanceof WI.TimelineRecording;
     }
 
-    async handleFileDrop(files)
+    get canHandleFindEvent()
     {
-        await WI.FileUtilities.readJSON(files, (result) => WI.timelineManager.processJSON(result));
+        console.assert(this._displayedContentView);
+        return this._displayedContentView.canFocusFilterBar;
+    }
+
+    handleFindEvent(event)
+    {
+        console.assert(this._displayedContentView);
+        this._displayedContentView.focusFilterBar();
+    }
+
+    // DropZoneView delegate
+
+    dropZoneShouldAppearForDragEvent(dropZone, event)
+    {
+        return event.dataTransfer.types.includes("Files");
+    }
+
+    dropZoneHandleDrop(dropZone, event)
+    {
+        let files = event.dataTransfer.files;
+        if (files.length !== 1) {
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        WI.FileUtilities.readJSON(files, (result) => WI.timelineManager.processJSON(result));
     }
 
     // Protected
+
+    initialLayout()
+    {
+        super.initialLayout();
+
+        let dropZoneView = new WI.DropZoneView(this);
+        dropZoneView.text = WI.UIString("Import Recording");
+        dropZoneView.targetElement = this.element;
+        this.addSubview(dropZoneView);
+    }
 
     restoreFromCookie(cookie)
     {
@@ -365,9 +409,6 @@ WI.TimelineTabContentView = class TimelineTabContentView extends WI.ContentBrows
         }
 
         let selectedTimelineViewIdentifier = cookie[WI.TimelineTabContentView.SelectedTimelineViewIdentifierCookieKey];
-        if (selectedTimelineViewIdentifier === WI.TimelineRecord.Type.RenderingFrame && !WI.FPSInstrument.supported())
-            selectedTimelineViewIdentifier = null;
-
         this._showTimelineViewForType(selectedTimelineViewIdentifier);
 
         super.restoreFromCookie(cookie);

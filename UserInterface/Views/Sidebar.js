@@ -42,7 +42,8 @@ WI.Sidebar = class Sidebar extends WI.View
         if (hasNavigationBar) {
             this.element.classList.add("has-navigation-bar");
 
-            this._navigationBar = new WI.SidebarNavigationBar(null, null, "tablist");
+            const navigationBarElement = null;
+            this._navigationBar = new WI.NavigationBar(navigationBarElement, {role: "tablist"});
             this._navigationBar.addEventListener(WI.NavigationBar.Event.NavigationItemSelected, this._navigationItemSelected, this);
             this.addSubview(this._navigationBar);
         }
@@ -90,10 +91,8 @@ WI.Sidebar = class Sidebar extends WI.View
         if (!sidebarPanel)
             return;
 
-        if (sidebarPanel.visible) {
+        if (sidebarPanel.visible)
             sidebarPanel.hidden();
-            sidebarPanel.visibilityDidChange();
-        }
 
         sidebarPanel.selected = false;
 
@@ -123,7 +122,6 @@ WI.Sidebar = class Sidebar extends WI.View
 
         if (this._selectedSidebarPanel) {
             this._selectedSidebarPanel.hidden();
-            this._selectedSidebarPanel.visibilityDidChange();
             this._selectedSidebarPanel.selected = false;
             this.removeSubview(this._selectedSidebarPanel);
         }
@@ -136,8 +134,8 @@ WI.Sidebar = class Sidebar extends WI.View
         if (this._selectedSidebarPanel) {
             this.addSubview(this._selectedSidebarPanel);
             this._selectedSidebarPanel.selected = true;
-            this._selectedSidebarPanel.shown();
-            this._selectedSidebarPanel.visibilityDidChange();
+            if (!this.collapsed)
+                this._selectedSidebarPanel.shown();
         }
 
         this.dispatchEventToListeners(WI.Sidebar.Event.SidebarPanelSelected);
@@ -145,11 +143,12 @@ WI.Sidebar = class Sidebar extends WI.View
 
     get minimumWidth()
     {
+        let minimumWidth = WI.Sidebar.AbsoluteMinimumWidth;
         if (this._navigationBar)
-            return Math.max(WI.Sidebar.AbsoluteMinimumWidth, this._navigationBar.minimumWidth);
+            minimumWidth = Math.max(minimumWidth, this._navigationBar.minimumWidth);
         if (this._selectedSidebarPanel)
-            return Math.max(WI.Sidebar.AbsoluteMinimumWidth, this._selectedSidebarPanel.minimumWidth);
-        return WI.Sidebar.AbsoluteMinimumWidth;
+            minimumWidth = Math.max(minimumWidth, this._selectedSidebarPanel.minimumWidth);
+        return minimumWidth;
     }
 
     get maximumWidth()
@@ -191,8 +190,6 @@ WI.Sidebar = class Sidebar extends WI.View
                 this._selectedSidebarPanel.shown();
             else
                 this._selectedSidebarPanel.hidden();
-
-            this._selectedSidebarPanel.visibilityDidChange();
         }
 
         this.dispatchEventToListeners(WI.Sidebar.Event.CollapsedStateDidChange);
@@ -274,10 +271,10 @@ WI.Sidebar = class Sidebar extends WI.View
             return;
 
         if (this._navigationBar)
-            this._navigationBar.updateLayoutIfNeeded(WI.View.LayoutReason.Resize);
+            this._navigationBar.updateLayout(WI.View.LayoutReason.Resize);
 
         if (this._selectedSidebarPanel)
-            this._selectedSidebarPanel.updateLayoutIfNeeded(WI.View.LayoutReason.Resize);
+            this._selectedSidebarPanel.updateLayout(WI.View.LayoutReason.Resize);
 
         this.dispatchEventToListeners(WI.Sidebar.Event.WidthDidChange, {newWidth});
     }

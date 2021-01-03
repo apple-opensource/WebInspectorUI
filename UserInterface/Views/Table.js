@@ -86,7 +86,8 @@ WI.Table = class Table extends WI.View
         this._columnWidths = null; // Calculated in _resizeColumnsAndFiller.
         this._fillerHeight = 0; // Calculated in _resizeColumnsAndFiller.
 
-        this._selectionController = new WI.SelectionController(this, (a, b) => this._indexForRepresentedObject(a) - this._indexForRepresentedObject(b));
+        let selectionComparator = WI.SelectionController.createListComparator(this._indexForRepresentedObject.bind(this));
+        this._selectionController = new WI.SelectionController(this, selectionComparator);
 
         this._resizers = [];
         this._currentResizer = null;
@@ -1127,7 +1128,9 @@ WI.Table = class Table extends WI.View
 
         // Completely remove all rows and add new ones.
         this._listElement.removeChildren();
-        this._listElement.classList.toggle("odd-first-zebra-stripe", !!(topHiddenRowCount % 2));
+
+        // If there are an odd number of rows hidden, the first visible row must be an even row.
+        this._listElement.classList.toggle("even-first-zebra-stripe", !!(topHiddenRowCount % 2));
 
         for (let i = this._visibleRowIndexStart; i < this._visibleRowIndexEnd && i < numberOfRows; ++i) {
             let row = this._getOrCreateRow(i);

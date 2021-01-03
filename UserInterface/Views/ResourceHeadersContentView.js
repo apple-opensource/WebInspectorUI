@@ -232,6 +232,8 @@ WI.ResourceHeadersContentView = class ResourceHeadersContentView extends WI.Cont
             return WI.UIString("Disk Cache");
         case WI.Resource.ResponseSource.ServiceWorker:
             return WI.UIString("Service Worker");
+        case WI.Resource.ResponseSource.InspectorOverride:
+            return WI.UIString("Local Override");
         case WI.Resource.ResponseSource.Unknown:
         default:
             return null;
@@ -475,7 +477,12 @@ WI.ResourceHeadersContentView = class ResourceHeadersContentView extends WI.Cont
 
     _perfomSearchOnKeyValuePairs()
     {
-        let searchRegex = WI.SearchUtilities.regExpForString(this._searchQuery, WI.SearchUtilities.defaultSettings);
+        let searchRegex = WI.SearchUtilities.searchRegExpForString(this._searchQuery, WI.SearchUtilities.defaultSettings);
+        if (!searchRegex) {
+            this.searchCleared();
+            this.dispatchEventToListeners(WI.TextEditor.Event.NumberOfSearchResultsDidChange);
+            return;
+        }
 
         let elements = this.element.querySelectorAll(".key, .value");
         for (let element of elements) {
@@ -487,7 +494,7 @@ WI.ResourceHeadersContentView = class ResourceHeadersContentView extends WI.Cont
 
             if (matchRanges.length) {
                 let highlightedNodes = WI.highlightRangesWithStyleClass(element, matchRanges, "search-highlight", this._searchDOMChanges);
-                this._searchResults = this._searchResults.concat(highlightedNodes);
+                this._searchResults.pushAll(highlightedNodes);
             }
         }
     }

@@ -43,13 +43,7 @@ WI.ScriptDetailsTimelineView = class ScriptDetailsTimelineView extends WI.Timeli
         columns.location.icon = true;
         columns.location.width = "15%";
 
-        let isSamplingProfiler = !!window.ScriptProfilerAgent;
-        if (isSamplingProfiler)
-            columns.callCount.title = WI.UIString("Samples");
-        else {
-            // COMPATIBILITY(iOS 9): ScriptProfilerAgent did not exist yet, we had call counts, not samples.
-            columns.callCount.title = WI.UIString("Calls");
-        }
+        columns.callCount.title = WI.UIString("Samples");
         columns.callCount.width = "5%";
         columns.callCount.aligned = "right";
 

@@ -30,8 +30,11 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
     {
         super();
 
+        this._warningCount = 0;
+        this._errorCount = 0;
         this._issues = [];
 
+        this._lastMessageLevel = null;
         this._clearMessagesRequested = false;
         this._isNewPageOrReload = false;
         this._remoteObjectsToRelease = null;
@@ -46,7 +49,7 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
 
     static supportsLogChannels()
     {
-        return !!ConsoleAgent.getLoggingChannels;
+        return InspectorBackend.hasCommand("Console.getLoggingChannels");
     }
 
     static issueMatchSourceCode(issue, sourceCode)
@@ -62,6 +65,8 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
 
     // Public
 
+    get warningCount() { return this._warningCount; }
+    get errorCount() { return this._errorCount; }
     get customLoggingChannels() { return this._customLoggingChannels; }
     get logChannelSources() { return this._loggingChannelSources; }
 
@@ -85,10 +90,10 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
         this._remoteObjectsToRelease.add(remoteObject);
     }
 
+    // ConsoleObserver
+
     messageWasAdded(target, source, level, text, type, url, line, column, repeatCount, parameters, stackTrace, requestId)
     {
-        // Called from WI.ConsoleObserver.
-
         // FIXME: Get a request from request ID.
 
         if (parameters)
@@ -96,9 +101,11 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
 
         let message = new WI.ConsoleMessage(target, source, level, text, type, url, line, column, repeatCount, parameters, stackTrace, null);
 
+        this._incrementMessageLevelCount(message.level, message.repeatCount);
+
         this.dispatchEventToListeners(WI.ConsoleManager.Event.MessageAdded, {message});
 
-        if (message.level === "warning" || message.level === "error") {
+        if (message.level === WI.ConsoleMessage.MessageLevel.Warning || message.level === WI.ConsoleMessage.MessageLevel.Error) {
             let issue = new WI.IssueMessage(message);
             this._issues.push(issue);
 
@@ -108,8 +115,6 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
 
     messagesCleared()
     {
-        // Called from WI.ConsoleObserver.
-
         if (this._remoteObjectsToRelease) {
             for (let remoteObject of this._remoteObjectsToRelease)
                 remoteObject.release();
@@ -122,7 +127,11 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
             // Frontend requested "clear console" and Backend successfully completed the request.
             this._clearMessagesRequested = false;
 
+            this._warningCount = 0;
+            this._errorCount = 0;
             this._issues = [];
+
+            this._lastMessageLevel = null;
 
             this.dispatchEventToListeners(WI.ConsoleManager.Event.Cleared);
         } else {
@@ -134,24 +143,9 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
         }
     }
 
-    _delayedMessagesCleared()
-    {
-        if (this._isNewPageOrReload) {
-            this._isNewPageOrReload = false;
-
-            if (!WI.settings.clearLogOnNavigate.value)
-                return;
-        }
-
-        this._issues = [];
-
-        // A console.clear() or command line clear() happened.
-        this.dispatchEventToListeners(WI.ConsoleManager.Event.Cleared);
-    }
-
     messageRepeatCountUpdated(count)
     {
-        // Called from WI.ConsoleObserver.
+        this._incrementMessageLevelCount(this._lastMessageLevel, 1);
 
         this.dispatchEventToListeners(WI.ConsoleManager.Event.PreviousMessageRepeatCountUpdated, {count});
     }
@@ -166,7 +160,7 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
 
     initializeLogChannels(target)
     {
-        console.assert(target.ConsoleAgent);
+        console.assert(target.hasDomain("Console"));
 
         if (!WI.ConsoleManager.supportsLogChannels())
             return;
@@ -187,6 +181,39 @@ WI.ConsoleManager = class ConsoleManager extends WI.Object
     }
 
     // Private
+
+    _incrementMessageLevelCount(level, count)
+    {
+        switch (level) {
+        case WI.ConsoleMessage.MessageLevel.Warning:
+            this._warningCount += count;
+            break;
+        case WI.ConsoleMessage.MessageLevel.Error:
+            this._errorCount += count;
+            break;
+        }
+
+        this._lastMessageLevel = level;
+    }
+
+    _delayedMessagesCleared()
+    {
+        if (this._isNewPageOrReload) {
+            this._isNewPageOrReload = false;
+
+            if (!WI.settings.clearLogOnNavigate.value)
+                return;
+        }
+
+        this._warningCount = 0;
+        this._errorCount = 0;
+        this._issues = [];
+
+        this._lastMessageLevel = null;
+
+        // A console.clear() or command line clear() happened.
+        this.dispatchEventToListeners(WI.ConsoleManager.Event.Cleared);
+    }
 
     _mainResourceDidChange(event)
     {
